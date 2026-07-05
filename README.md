@@ -1,3 +1,5 @@
+![alt text](./readme/two.png)
+
 # LuckFox KVM Matrix
 
 A Matrix-themed Vue/TypeScript dashboard for controlling LuckFox PicoKVM devices and/or host-agent-only machines from one place. It shows one rounded card per device, can show both the KVM IP and the PC/host-agent IP, tracks separate online status for the KVM and PC every 15 seconds, checks KVM/login/video/USB status when a KVM is enabled, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent. Devices without a physical KVM can set `kvm.enabled: false` or simply `kvm: false`; their cards keep PC status/stats/scripts and hide the KVM controls.
