@@ -10,6 +10,14 @@ export interface ServerConfig {
   pollIntervalMs?: number;
 }
 
+export interface HostScriptConfig {
+  enabled?: boolean;
+  url: string;
+  token?: string;
+  label?: string;
+  timeoutMs?: number;
+}
+
 export interface KvmConfigEntry {
   id: string;
   name: string;
@@ -18,6 +26,7 @@ export interface KvmConfigEntry {
   notes?: string;
   protocol?: 'http' | 'https';
   hostMacAddress?: string;
+  hostScript?: HostScriptConfig;
 }
 
 export interface AppConfig {
@@ -32,6 +41,8 @@ export interface PublicKvm {
   notes: string;
   websiteUrl: string;
   hasWolMac: boolean;
+  hasHostScript: boolean;
+  hostScriptLabel: string;
 }
 
 export interface VideoState extends JsonRecord {
@@ -39,6 +50,70 @@ export interface VideoState extends JsonRecord {
   width?: number;
   height?: number;
   fps?: number;
+  error?: string;
+}
+
+export interface HostStatsMemory {
+  totalBytes?: number;
+  availableBytes?: number;
+  usedBytes?: number;
+  freeBytes?: number;
+  percent?: number;
+}
+
+export interface HostStatsCpu {
+  percent?: number;
+  countLogical?: number;
+  countPhysical?: number | null;
+  loadAverage?: number[] | null;
+  frequencyMhz?: JsonValue;
+}
+
+export interface HostStatsDisk {
+  path?: string;
+  device?: string;
+  mountpoint?: string;
+  fstype?: string;
+  totalBytes?: number;
+  usedBytes?: number;
+  freeBytes?: number;
+  percent?: number;
+}
+
+export interface HostStatsDocker {
+  containerized?: boolean;
+  psutilProcfsPath?: string;
+  hostProcMounted?: boolean;
+  hostRootMounted?: boolean;
+  cgroup?: JsonValue;
+}
+
+export interface HostStatsPlatform {
+  system?: string;
+  release?: string;
+  version?: string;
+  machine?: string;
+  pythonVersion?: string;
+  osName?: string;
+}
+
+export interface HostStats {
+  ok?: boolean;
+  service?: string;
+  collectedAt?: string;
+  hostname?: string;
+  platform?: HostStatsPlatform;
+  docker?: HostStatsDocker;
+  uptimeSeconds?: number;
+  bootTime?: string;
+  cpu?: HostStatsCpu;
+  memory?: HostStatsMemory;
+  swap?: HostStatsMemory;
+  disks?: HostStatsDisk[];
+  network?: JsonValue;
+  temperatures?: JsonValue;
+  topProcesses?: JsonValue;
+  battery?: JsonValue;
   error?: string;
 }
 
@@ -50,6 +125,8 @@ export interface KvmStatus extends PublicKvm {
   usb: JsonValue | undefined;
   keyboardLeds: JsonValue | undefined;
   hostPower: string;
+  hostStats: HostStats | null;
+  hostStatsError: string;
   latencyMs: number | null;
   checkedAt: string;
   error: string;

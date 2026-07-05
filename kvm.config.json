@@ -9,33 +9,61 @@
       "id": "lmde",
       "name": "LMDE",
       "ip": "192.168.10.91",
-      "password": "acca12",
+      "password": "pass",
       "notes": "Linux Mint Debian Edition host",
-      "hostMacAddress": ""
+      "hostMacAddress": "",
+      "hostScript": {
+        "enabled": true,
+        "url": "http://192.168.10.91:8799",
+        "token": "change-me-agent-token",
+        "label": "Run LMDE Script",
+        "timeoutMs": 60000
+      }
     },
     {
       "id": "am4",
       "name": "AM4",
       "ip": "192.168.10.92",
-      "password": "acca12",
+      "password": "pass",
       "notes": "AM4 workstation / test host",
-      "hostMacAddress": ""
+      "hostMacAddress": "",
+      "hostScript": {
+        "enabled": true,
+        "url": "http://192.168.10.92:8799",
+        "token": "change-me-agent-token",
+        "label": "Run AM4 Script",
+        "timeoutMs": 60000
+      }
     },
     {
       "id": "nas",
       "name": "NAS",
       "ip": "192.168.10.93",
-      "password": "acca12",
+      "password": "pass",
       "notes": "Storage server",
-      "hostMacAddress": ""
+      "hostMacAddress": "",
+      "hostScript": {
+        "enabled": true,
+        "url": "http://192.168.10.93:8799",
+        "token": "change-me-agent-token",
+        "label": "Run NAS Script",
+        "timeoutMs": 60000
+      }
     },
     {
       "id": "pcmain",
       "name": "PCMAIN",
       "ip": "192.168.10.94",
-      "password": "acca12",
+      "password": "pass",
       "notes": "Main PC",
-      "hostMacAddress": ""
+      "hostMacAddress": "",
+      "hostScript": {
+        "enabled": true,
+        "url": "http://192.168.10.94:8799",
+        "token": "change-me-agent-token",
+        "label": "Run PCMAIN Script",
+        "timeoutMs": 60000
+      }
     }
   ]
 }

@@ -2,6 +2,7 @@ import type {
   ActionPayload,
   ApiFailure,
   ApiSuccess,
+  HostStats,
   KvmStatus,
   KvmsResponse,
   StatusesResponse
@@ -62,6 +63,12 @@ export async function fetchAllStatuses(): Promise<StatusesResponse> {
 export async function fetchKvmStatus(id: string): Promise<KvmStatus> {
   const response = await fetch(`/api/kvms/${encodeURIComponent(id)}/status`);
   return parseJsonResponse<KvmStatus>(response);
+}
+
+export async function fetchHostStats(id: string): Promise<HostStats | null> {
+  const response = await fetch(`/api/kvms/${encodeURIComponent(id)}/host-stats`);
+  const data = await parseJsonResponse<{ ok: true; stats: HostStats | null }>(response);
+  return data.stats;
 }
 
 export async function runKvmAction<T = unknown>(id: string, action: string, payload: ActionPayload = {}): Promise<ApiSuccess<T>> {

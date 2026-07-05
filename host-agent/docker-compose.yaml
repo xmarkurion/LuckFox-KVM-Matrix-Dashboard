@@ -1,0 +1,23 @@
+services:
+  host-script-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luckfox-host-script-agent
+    restart: unless-stopped
+    ports:
+      - "8799:8799"
+    environment:
+      AGENT_TOKEN: change-me-agent-token
+      SCRIPT_PATH: /scripts/host_action.py
+      SCRIPT_TIMEOUT_SECONDS: 60
+      HOST_PROC_PATH: /host/proc
+      HOST_ROOT_PATH: /host/root
+      STATS_MAX_PROCESSES: 8
+    volumes:
+      # Edit scripts/host_action.py on the host whenever you need to change behavior.
+      - ./scripts:/scripts
+      # Optional host-stat mounts. These are read-only and let the agent report the host view,
+      # not just the container view. Remove them if you only want container-visible stats.
+      - /proc:/host/proc:ro
+      - /:/host/root:ro

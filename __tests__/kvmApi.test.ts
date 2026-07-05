@@ -1,4 +1,4 @@
-import { fetchKvms, runKvmAction, runRawRpc } from '../src/services/kvmApi';
+import { fetchHostStats, fetchKvms, runKvmAction, runRawRpc } from '../src/services/kvmApi';
 
 function mockJsonResponse(body: unknown, init: Partial<Response> = {}): Response {
   return {
@@ -22,6 +22,14 @@ describe('kvmApi service', () => {
 
     await expect(fetchKvms()).resolves.toEqual({ kvms: [{ id: 'am4' }], pollIntervalMs: 15000 });
     expect(fetch).toHaveBeenCalledWith('/api/kvms');
+  });
+
+
+  test('fetchHostStats returns host-agent stats', async () => {
+    jest.mocked(fetch).mockResolvedValue(mockJsonResponse({ ok: true, stats: { hostname: 'am4-host' } }));
+
+    await expect(fetchHostStats('am4')).resolves.toEqual({ hostname: 'am4-host' });
+    expect(fetch).toHaveBeenCalledWith('/api/kvms/am4/host-stats');
   });
 
   test('runKvmAction posts action payload', async () => {

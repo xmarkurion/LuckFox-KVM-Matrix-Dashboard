@@ -15,17 +15,27 @@
       <div><span>Power LED:</span><strong>{{ status?.hostPower || 'unknown' }}</strong></div>
       <div><span>Video:</span><strong>{{ videoLabel(status?.video) }}</strong></div>
       <div><span>USB:</span><strong>{{ usbLabel(status?.usb) }}</strong></div>
+      <div><span>Host script:</span><strong>{{ kvm.hasHostScript ? 'configured' : 'not configured' }}</strong></div>
       <div><span>Latency:</span><strong>{{ status?.latencyMs ?? '—' }} ms</strong></div>
       <div><span>Checked:</span><strong>{{ timeAgo(status?.checkedAt) }}</strong></div>
     </div>
 
     <p v-if="status?.error" class="inline-error">{{ status.error }}</p>
 
+    <HostStatsPanel :stats="status?.hostStats" :error="status?.hostStatsError" />
+
     <div class="button-row">
       <a class="btn secondary" :href="kvm.websiteUrl" target="_blank" rel="noreferrer">Open KVM</a>
       <ActionButton label="Refresh" :busy="busy === 'refresh'" @click="$emit('refresh')" />
       <ActionButton label="Power" kind="primary" :busy="busy === 'power'" @click="emitAction('power')" />
       <ActionButton label="Arrow Up" kind="primary" :busy="busy === 'arrowUp'" @click="emitAction('arrowUp')" />
+      <ActionButton
+        :label="kvm.hostScriptLabel || 'Run Script'"
+        kind="primary"
+        :disabled="!kvm.hasHostScript"
+        :busy="busy === 'hostScript'"
+        @click="emitAction('hostScript')"
+      />
     </div>
 
     <details class="details-block">
@@ -36,6 +46,12 @@
           <ActionButton label="Reset" kind="danger" :busy="busy === 'reset'" @click="emitAction('reset')" />
           <ActionButton label="USB Wakeup" :busy="busy === 'usbWakeup'" @click="emitAction('usbWakeup')" />
           <ActionButton label="Wake-on-LAN" :disabled="!kvm.hasWolMac" :busy="busy === 'wol'" @click="emitAction('wol')" />
+          <ActionButton
+            :label="kvm.hostScriptLabel || 'Run Host Script'"
+            :disabled="!kvm.hasHostScript"
+            :busy="busy === 'hostScript'"
+            @click="emitAction('hostScript')"
+          />
         </div>
       </section>
 
@@ -50,6 +66,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import ActionButton from './ActionButton.vue';
+import HostStatsPanel from './HostStatsPanel.vue';
 import KeyboardPanel from './KeyboardPanel.vue';
 import MousePanel from './MousePanel.vue';
 import RawRpcPanel from './RawRpcPanel.vue';
