@@ -98,7 +98,7 @@ describe('KvmCard', () => {
     const wrapper = mount(KvmCard, { props: { kvm: agentOnlyKvm, status: agentOnlyStatus, busy: '' } });
 
     expect(wrapper.text()).toContain('ScriptBox');
-    expect(wrapper.text()).toContain('Host-agent only');
+    expect(wrapper.text()).not.toContain('Host-agent only');
     expect(wrapper.text()).toContain('PC IP:');
     expect(wrapper.text()).toContain('192.168.10.150');
     expect(wrapper.text()).toContain('PC online');

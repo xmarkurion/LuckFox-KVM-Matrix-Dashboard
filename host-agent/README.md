@@ -3,7 +3,7 @@
 FastAPI service that runs on a target machine and gives the LuckFox KVM Matrix dashboard several optional features:
 
 1. Run named Python scripts from a mounted `scripts/` directory.
-2. Provide guarded example scripts for reboot and force power-off.
+2. Provide guarded example scripts for safe shutdown, reboot, and force power-off.
 3. Return host stats such as CPU, memory, disks, uptime, OS, Docker/cgroup visibility, network counters, temperatures, battery, and top processes when visible from Docker.
 4. Provide a lightweight `GET /health` endpoint that the dashboard pings every 15 seconds by default to show the PC online/offline badge.
 
@@ -97,6 +97,7 @@ The agent runs scripts by id. The id maps to a Python file in the mounted `/scri
 ```text
 host_action     -> /scripts/host_action.py
 script2         -> /scripts/script2.py
+power_off_safe  -> /scripts/power_off_safe.py
 power_off_force -> /scripts/power_off_force.py
 reboot_pc       -> /scripts/reboot_pc.py
 backup          -> /scripts/backup.py
@@ -118,11 +119,12 @@ List scripts visible to the agent:
 curl -H "Authorization: Bearer change-me-agent-token" http://127.0.0.1:8799/scripts
 ```
 
-## Built-in reboot and force power-off scripts
+## Built-in safe power-off, force power-off, and reboot scripts
 
-The agent includes two guarded scripts:
+The agent includes three guarded scripts:
 
 ```text
+/scripts/power_off_safe.py
 /scripts/power_off_force.py
 /scripts/reboot_pc.py
 ```
@@ -168,23 +170,32 @@ true host
 Manual tests:
 
 ```bash
+# Safe power off the host: normal OS shutdown, no force flags, no SysRq
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{"scriptId":"power_off_safe","scriptLabel":"Safe Power Off"}'
+
+# Reboot the host
 curl -X POST http://127.0.0.1:8799/run \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer change-me-agent-token" \
   -d '{"scriptId":"reboot_pc","scriptLabel":"Reboot PC"}'
 
+# Force power off the host: abrupt fallback if safe shutdown is not enough
 curl -X POST http://127.0.0.1:8799/run \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer change-me-agent-token" \
   -d '{"scriptId":"power_off_force","scriptLabel":"Force Power Off"}'
 ```
 
-The scripts try multiple Linux methods and return an `attempts` list with each command, exit code, stdout, and stderr. This is useful when a host returns `exitCode: 2`.
+The safe script requests normal OS shutdown only. The force and reboot scripts try multiple Linux methods and return an `attempts` list with each command, exit code, stdout, and stderr. This is useful when a host returns `exitCode: 2`.
 
 Optional command overrides:
 
 ```yaml
 environment:
+  SAFE_POWER_OFF_COMMAND: "shutdown -P now"
   POWER_OFF_COMMAND: "shutdown -h now"
   REBOOT_COMMAND: "shutdown -r now"
 ```

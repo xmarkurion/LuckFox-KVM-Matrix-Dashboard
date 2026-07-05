@@ -49,7 +49,7 @@ services:
       HOST_PROC_PATH: /host/proc
       HOST_ROOT_PATH: /host/root
       STATS_MAX_PROCESSES: 8
-      # Safety guard for power_off_force.py and reboot_pc.py.
+      # Safety guard for power_off_safe.py, power_off_force.py, and reboot_pc.py.
       # Change to "true" only on trusted hosts where you want the agent to shut down/reboot the host.
       ALLOW_HOST_POWER_COMMANDS: "false"
       # Optional last-resort Linux SysRq fallback. This is abrupt. Enable only if normal shutdown/reboot methods fail.

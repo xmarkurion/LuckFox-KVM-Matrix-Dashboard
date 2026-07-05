@@ -172,6 +172,11 @@ Set the same value in `kvm.config.json`:
       "description": "Second example script. Rename this to something meaningful."
     },
     {
+      "id": "power_off_safe",
+      "label": "Safe Power Off AM4",
+      "description": "Requests a normal OS shutdown through the host agent."
+    },
+    {
       "id": "power_off_force",
       "label": "Force Power Off AM4",
       "description": "Force powers off the host through the host agent."
@@ -215,6 +220,7 @@ The host agent runs scripts by `id`:
 ```text
 script id: host_action      ->  host-agent/scripts/host_action.py
 script id: script2          ->  host-agent/scripts/script2.py
+script id: power_off_safe   ->  host-agent/scripts/power_off_safe.py
 script id: power_off_force  ->  host-agent/scripts/power_off_force.py
 script id: reboot_pc        ->  host-agent/scripts/reboot_pc.py
 script id: backup           ->  host-agent/scripts/backup.py
@@ -289,16 +295,17 @@ KVM_PAYLOAD_JSON
 
 ---
 
-## Built-in reboot and force power-off scripts
+## Built-in safe power-off, force power-off, and reboot scripts
 
-Version `1.3.5` includes two guarded host power scripts:
+Version `1.3.6` includes three guarded host power scripts:
 
 ```text
+host-agent/scripts/power_off_safe.py
 host-agent/scripts/power_off_force.py
 host-agent/scripts/reboot_pc.py
 ```
 
-They are listed in the example `kvm.config.json`, so they appear in each card's **Scripts** dropdown as readable actions such as **Force Power Off AM4** and **Reboot AM4**.
+They are listed in the example `kvm.config.json`, so they appear in each card's **Scripts** dropdown as readable actions such as **Safe Power Off AM4**, **Force Power Off AM4**, and **Reboot AM4**.
 
 These scripts are guarded by default. The agent refuses to run them until this environment variable is enabled on the target host:
 
@@ -342,25 +349,32 @@ true host
 Manual tests:
 
 ```bash
+# Safe power off the host: normal OS shutdown, no force flags, no SysRq
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{"scriptId":"power_off_safe","scriptLabel":"Safe Power Off"}'
+
 # Reboot the host
 curl -X POST http://127.0.0.1:8799/run \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer change-me-agent-token" \
   -d '{"scriptId":"reboot_pc","scriptLabel":"Reboot PC"}'
 
-# Force power off the host
+# Force power off the host: abrupt fallback if safe shutdown is not enough
 curl -X POST http://127.0.0.1:8799/run \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer change-me-agent-token" \
   -d '{"scriptId":"power_off_force","scriptLabel":"Force Power Off"}'
 ```
 
-The scripts now try multiple Linux methods instead of stopping after the first failure. The JSON output contains an `attempts` list showing each command, exit code, stdout, and stderr.
+The safe script requests normal OS shutdown only. The force and reboot scripts try multiple Linux methods instead of stopping after the first failure. Their JSON output contains an `attempts` list showing each command, exit code, stdout, and stderr.
 
-You can override the exact commands without editing the script:
+You can override the exact commands without editing the scripts:
 
 ```yaml
 environment:
+  SAFE_POWER_OFF_COMMAND: "shutdown -P now"
   POWER_OFF_COMMAND: "shutdown -h now"
   REBOOT_COMMAND: "shutdown -r now"
 ```
@@ -441,6 +455,11 @@ The preferred config separates the physical KVM from the PC/host agent. This let
         "description": "Example second script. Rename this label to match the task."
       },
       {
+        "id": "power_off_safe",
+        "label": "Safe Power Off AM4",
+        "description": "Runs the host-agent safe OS shutdown script on this PC."
+      },
+      {
         "id": "power_off_force",
         "label": "Force Power Off AM4",
         "description": "Runs the host-agent force power-off script on this PC."
@@ -482,6 +501,11 @@ Use this when the PC has a FastAPI host agent but no LuckFox KVM. The dashboard 
         "id": "script2",
         "label": "ScriptBox Maintenance",
         "description": "Example second script for this host."
+      },
+      {
+        "id": "power_off_safe",
+        "label": "Safe Power Off ScriptBox",
+        "description": "Runs the host-agent safe OS shutdown script on this PC."
       },
       {
         "id": "power_off_force",
@@ -612,6 +636,7 @@ luckfox-kvm-matrix/
 │   └── scripts/
 │       ├── host_action.py
 │       ├── script2.py
+│       ├── power_off_safe.py
 │       ├── power_off_force.py
 │       └── reboot_pc.py
 └── __tests__/
@@ -674,9 +699,13 @@ Default editable script.
 
 Example second script showing how multiple named scripts work.
 
+### `host-agent/scripts/power_off_safe.py`
+
+Guarded script for safe OS shutdown of the target host. It uses normal shutdown commands only, with no force flags and no SysRq fallback. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
+
 ### `host-agent/scripts/power_off_force.py`
 
-Guarded script for force powering off the target host. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
+Guarded script for force powering off the target host. This is the abrupt fallback when safe shutdown is not enough. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
 
 ### `host-agent/scripts/reboot_pc.py`
 

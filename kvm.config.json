@@ -26,6 +26,11 @@
             "description": "Example second script. Rename this label to match the task."
           },
           {
+            "id": "power_off_safe",
+            "label": "Safe Power Off LMDE",
+            "description": "Runs the host-agent safe OS shutdown script on this PC."
+          },
+          {
             "id": "power_off_force",
             "label": "Force Power Off LMDE",
             "description": "Runs the host-agent force power-off script on this PC."
@@ -64,6 +69,11 @@
             "id": "script2",
             "label": "AM4 Example Script 2",
             "description": "Example second script. Rename this label to match the task."
+          },
+          {
+            "id": "power_off_safe",
+            "label": "Safe Power Off AM4",
+            "description": "Runs the host-agent safe OS shutdown script on this PC."
           },
           {
             "id": "power_off_force",
@@ -106,6 +116,11 @@
             "description": "Example second script. Rename this label to match the task."
           },
           {
+            "id": "power_off_safe",
+            "label": "Safe Power Off NAS",
+            "description": "Runs the host-agent safe OS shutdown script on this PC."
+          },
+          {
             "id": "power_off_force",
             "label": "Force Power Off NAS",
             "description": "Runs the host-agent force power-off script on this PC."
@@ -144,6 +159,11 @@
             "id": "script2",
             "label": "PCMAIN Example Script 2",
             "description": "Example second script. Rename this label to match the task."
+          },
+          {
+            "id": "power_off_safe",
+            "label": "Safe Power Off PCMAIN",
+            "description": "Runs the host-agent safe OS shutdown script on this PC."
           },
           {
             "id": "power_off_force",

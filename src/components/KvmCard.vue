@@ -31,7 +31,6 @@
       </div>
     </div>
 
-    <p v-if="!kvm.kvmEnabled" class="agent-only-note">Host-agent only · LuckFox KVM controls are hidden for this device.</p>
     <p class="notes">{{ kvm.notes || 'No notes yet.' }}</p>
 
     <div class="status-lines">
