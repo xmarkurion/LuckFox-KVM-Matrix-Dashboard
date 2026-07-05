@@ -8,7 +8,11 @@ import type {
   JsonRpcEnvelope,
   JsonRpcRequestPayload,
   JsonValue,
+  HostAgentConfig,
+  HostScriptEntry,
+  HostStats,
   KvmConfigEntry,
+  KvmEndpointConfig,
   KvmStatus,
   PublicKvm,
   RequestBody,
@@ -108,6 +112,7 @@ const ACTIONS: ServerAction[] = [
   { id: 'usbWakeup', label: 'USB wakeup', rpc: 'sendUsbWakeupSignal' },
   { id: 'wol', label: 'Wake-on-LAN', rpc: 'sendWOLMagicPacket', params: ['macAddress'] },
   { id: 'arrowUp', label: 'Arrow Up', rpc: 'keyboardReport' },
+  { id: 'hostScript', label: 'Run configured host script', rpc: 'hostScript', params: ['scriptId'] },
   { id: 'ctrlAltDel', label: 'Ctrl+Alt+Del', rpc: 'keyboardReport' },
   { id: 'keyPress', label: 'Key press', rpc: 'keyboardReport', params: ['key'] },
   { id: 'keyCombo', label: 'Key combo', rpc: 'keyboardReport', params: ['combo'] },
@@ -143,19 +148,150 @@ function findKvm(id: string): KvmConfigEntry {
   return kvm;
 }
 
+interface ResolvedKvmEndpoint {
+  enabled: boolean;
+  ip: string;
+  password: string;
+  protocol: 'http' | 'https';
+  hostMacAddress: string;
+}
+
+function resolvedKvmEndpoint(entry: KvmConfigEntry): ResolvedKvmEndpoint {
+  const nested: KvmEndpointConfig = entry.kvm && typeof entry.kvm === 'object' ? entry.kvm : {};
+  const ip = String(nested.ip ?? entry.ip ?? '').trim();
+  const password = String(nested.password ?? entry.password ?? '').trim();
+  const protocol = nested.protocol || entry.protocol || 'http';
+  const hostMacAddress = String(nested.hostMacAddress ?? entry.hostMacAddress ?? '').trim();
+  const explicitlyDisabled = entry.kvm === false || nested.enabled === false || entry.kvmEnabled === false;
+
+  return {
+    enabled: !explicitlyDisabled && Boolean(ip && password),
+    ip,
+    password,
+    protocol,
+    hostMacAddress
+  };
+}
+
+function ensureKvmEnabled(entry: KvmConfigEntry): ResolvedKvmEndpoint {
+  const endpoint = resolvedKvmEndpoint(entry);
+  if (!endpoint.enabled) {
+    throw httpError(`LuckFox KVM is not configured/enabled for ${entry.name}`, 400);
+  }
+  return endpoint;
+}
+
 function baseUrl(kvm: KvmConfigEntry): string {
-  const ip = kvm.ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  return `${kvm.protocol || 'http'}://${ip}`;
+  const endpoint = ensureKvmEnabled(kvm);
+  const ip = endpoint.ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return `${endpoint.protocol}://${ip}`;
+}
+
+const DEFAULT_HOST_SCRIPT_ID = 'host_action';
+
+type NormalizedHostScript = HostScriptEntry & { id: string; label: string; description: string };
+
+interface NormalizedHostAgent {
+  enabled: boolean;
+  url: string;
+  token?: string;
+  timeoutMs?: number;
+  scripts: NormalizedHostScript[];
+}
+
+function normalizeScriptId(value: unknown): string {
+  return String(value || '').trim();
+}
+
+function normalizeHostScript(script: HostScriptEntry, fallbackLabel: string): NormalizedHostScript | null {
+  const id = normalizeScriptId(script.id);
+  if (!id || script.enabled === false) return null;
+
+  return {
+    id,
+    label: String(script.label || fallbackLabel || id),
+    description: String(script.description || ''),
+    timeoutMs: script.timeoutMs,
+    enabled: script.enabled
+  };
+}
+
+function hostAgentConfig(kvm: KvmConfigEntry): NormalizedHostAgent | null {
+  const legacy = kvm.hostScript;
+  const source: HostAgentConfig | undefined = kvm.hostAgent || (legacy
+    ? {
+        enabled: legacy.enabled,
+        url: legacy.url,
+        token: legacy.token,
+        timeoutMs: legacy.timeoutMs,
+        scripts: [{
+          id: DEFAULT_HOST_SCRIPT_ID,
+          label: legacy.label || 'Run Host Script',
+          description: 'Legacy single-script host action.'
+        }]
+      }
+    : undefined);
+
+  const url = source?.url?.trim().replace(/\/$/, '');
+  if (!source || !url || source.enabled === false) return null;
+
+  const configuredScripts = Array.isArray(source.scripts) ? source.scripts : [];
+  let scripts = configuredScripts
+    .map((script) => normalizeHostScript(script, 'Run Host Script'))
+    .filter((script): script is NormalizedHostScript => Boolean(script));
+
+  if (!scripts.length) {
+    scripts = [{
+      id: DEFAULT_HOST_SCRIPT_ID,
+      label: legacy?.label || 'Run Host Script',
+      description: 'Default editable host action.'
+    }];
+  }
+
+  return {
+    enabled: true,
+    url,
+    token: source.token,
+    timeoutMs: source.timeoutMs,
+    scripts
+  };
+}
+
+function pcUrlFor(kvm: KvmConfigEntry): string {
+  return hostAgentConfig(kvm)?.url || '';
+}
+
+function pcIpFromUrl(url: string): string {
+  if (!url) return '';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url.replace(/^https?:\/\//, '').replace(/\/$/, '').split(':')[0];
+  }
 }
 
 function publicKvm(kvm: KvmConfigEntry): PublicKvm {
+  const agent = hostAgentConfig(kvm);
+  const endpoint = resolvedKvmEndpoint(kvm);
+  const hostScripts = agent?.scripts.map((script) => ({
+    id: script.id,
+    label: script.label,
+    description: script.description || ''
+  })) || [];
+
   return {
     id: kvm.id,
     name: kvm.name,
-    ip: kvm.ip,
+    kvmEnabled: endpoint.enabled,
+    ip: endpoint.enabled ? endpoint.ip : '',
+    websiteUrl: endpoint.enabled ? baseUrl(kvm) : '',
+    pcUrl: pcUrlFor(kvm),
+    pcIp: pcIpFromUrl(pcUrlFor(kvm)),
     notes: kvm.notes || '',
-    websiteUrl: baseUrl(kvm),
-    hasWolMac: Boolean(kvm.hostMacAddress)
+    hasWolMac: endpoint.enabled && Boolean(endpoint.hostMacAddress),
+    hasHostScript: hostScripts.length > 0,
+    hostScriptLabel: hostScripts[0]?.label || 'Run Host Script',
+    hostScripts
   };
 }
 
@@ -170,9 +306,9 @@ function jsonRpcPayload(method: string, params: JsonRecord = {}): JsonRpcRequest
   return { jsonrpc: '2.0', id: Date.now(), method, params };
 }
 
-async function fetchWithTimeout(url: string, options: globalThis.RequestInit = {}): Promise<globalThis.Response> {
+async function fetchWithTimeout(url: string, options: globalThis.RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<globalThis.Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
@@ -215,7 +351,7 @@ async function login(kvm: KvmConfigEntry): Promise<JsonValue> {
   const response = await fetchWithTimeout(`${baseUrl(kvm)}/auth/login-local`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: kvm.password })
+    body: JSON.stringify({ password: ensureKvmEnabled(kvm).password })
   });
   if (response.status === 401) throw httpError('Login rejected by KVM', 401);
   if (!response.ok) throw httpError(`Login failed with HTTP ${response.status}`, response.status);
@@ -293,43 +429,201 @@ async function typeText(kvm: KvmConfigEntry, text: unknown, delayMs = 5): Promis
   return { typed: normalizedText.length };
 }
 
+function hostAgentUrl(kvm: KvmConfigEntry): string {
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    throw httpError(`Host script agent is not configured for ${kvm.name}`, 400);
+  }
+  return agent.url;
+}
+
+function hostAgentHeaders(kvm: KvmConfigEntry, json = false): Record<string, string> {
+  const agent = hostAgentConfig(kvm);
+  const headers: Record<string, string> = json ? { 'Content-Type': 'application/json' } : {};
+  if (agent?.token) {
+    headers.Authorization = `Bearer ${agent.token}`;
+    headers['X-Agent-Token'] = agent.token;
+  }
+  return headers;
+}
+
+function findConfiguredHostScript(kvm: KvmConfigEntry, requestedScriptId?: unknown): NormalizedHostScript {
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    throw httpError(`Host script agent is not configured for ${kvm.name}`, 400);
+  }
+
+  const scriptId = normalizeScriptId(requestedScriptId) || agent.scripts[0]?.id || DEFAULT_HOST_SCRIPT_ID;
+  const script = agent.scripts.find((entry) => entry.id === scriptId);
+  if (!script) {
+    throw httpError(`Host script is not configured for ${kvm.name}: ${scriptId}`, 404);
+  }
+  return script;
+}
+
+async function runHostScript(kvm: KvmConfigEntry, payload: RequestBody = {}): Promise<JsonValue | null> {
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    throw httpError(`Host script agent is not configured for ${kvm.name}`, 400);
+  }
+
+  const script = findConfiguredHostScript(kvm, payload.scriptId);
+  const timeoutMs = Number(script.timeoutMs || agent.timeoutMs || 60000);
+
+  const response = await fetchWithTimeout(`${hostAgentUrl(kvm)}/run`, {
+    method: 'POST',
+    headers: hostAgentHeaders(kvm, true),
+    body: JSON.stringify({
+      scriptId: script.id,
+      scriptLabel: script.label,
+      kvm: publicKvm(kvm),
+      payload,
+      timeoutSeconds: Math.ceil(timeoutMs / 1000)
+    })
+  }, timeoutMs + 2000);
+
+  const text = await response.text().catch(() => '');
+  let data: JsonValue | null = null;
+  if (text) {
+    try {
+      data = JSON.parse(text) as JsonValue;
+    } catch {
+      data = { raw: text };
+    }
+  }
+
+  if (!response.ok) {
+    const message = isJsonRecord(data) && typeof data.detail === 'string'
+      ? data.detail
+      : `Host script agent failed with HTTP ${response.status}: ${text.slice(0, 200)}`;
+    throw httpError(message, response.status, data);
+  }
+
+  if (isJsonRecord(data) && data.ok === false) {
+    const stderr = typeof data.stderr === 'string' ? data.stderr.trim() : '';
+    const exitCode = typeof data.exitCode === 'number' ? data.exitCode : 'unknown';
+    throw httpError(`Host script ${script.label} exited with code ${exitCode}${stderr ? `: ${stderr.slice(0, 200)}` : ''}`, 502, data);
+  }
+
+  return data;
+}
+
+async function getPcReachability(kvm: KvmConfigEntry): Promise<{ responds: boolean; latencyMs: number | null; checkedAt: string; error: string }> {
+  const checkedAt = new Date().toISOString();
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    return { responds: false, latencyMs: null, checkedAt, error: 'Host agent is not configured' };
+  }
+
+  const started = Date.now();
+  try {
+    const response = await fetchWithTimeout(`${agent.url}/health`, { method: 'GET' }, Math.min(Number(agent.timeoutMs || 60000), 3000));
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      return { responds: false, latencyMs, checkedAt, error: `Host agent health returned HTTP ${response.status}` };
+    }
+    return { responds: true, latencyMs, checkedAt, error: '' };
+  } catch (error) {
+    return {
+      responds: false,
+      latencyMs: Date.now() - started,
+      checkedAt,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function getHostStats(kvm: KvmConfigEntry): Promise<HostStats | null> {
+  if (!hostAgentConfig(kvm)) return null;
+
+  const response = await fetchWithTimeout(`${hostAgentUrl(kvm)}/stats`, {
+    method: 'GET',
+    headers: hostAgentHeaders(kvm)
+  }, Math.min(Number(hostAgentConfig(kvm)?.timeoutMs || 60000), 10000));
+
+  const text = await response.text().catch(() => '');
+  let data: HostStats | null = null;
+  if (text) {
+    try {
+      data = JSON.parse(text) as HostStats;
+    } catch {
+      data = { ok: false, error: text.slice(0, 200) };
+    }
+  }
+
+  if (!response.ok) {
+    const detail = data && typeof data.error === 'string' ? data.error : text.slice(0, 200);
+    throw httpError(`Host stats agent failed with HTTP ${response.status}${detail ? `: ${detail}` : ''}`, response.status, data);
+  }
+
+  return data;
+}
+
 async function getStatus(kvm: KvmConfigEntry): Promise<KvmStatus> {
   const started = Date.now();
   const status: KvmStatus = {
     ...publicKvm(kvm),
     kvmResponds: false,
     authenticated: false,
+    pcResponds: false,
+    pcLatencyMs: null,
+    pcCheckedAt: new Date().toISOString(),
+    pcError: '',
     deviceId: '',
     video: null,
     usb: undefined,
     keyboardLeds: undefined,
     hostPower: 'unknown',
+    hostStats: null,
+    hostStatsError: '',
     latencyMs: null,
     checkedAt: new Date().toISOString(),
     error: ''
   };
-  try {
-    await login(kvm);
-    status.authenticated = true;
-    const [ping, deviceId, video, usb, keyboardLeds] = await Promise.allSettled([
-      rpc<string>(kvm, 'ping'),
-      rpc<string>(kvm, 'getDeviceID'),
-      rpc<VideoState>(kvm, 'getVideoState'),
-      rpc<JsonValue>(kvm, 'getUSBState'),
-      rpc<JsonValue>(kvm, 'getKeyboardLedState')
-    ]);
 
-    status.kvmResponds = ping.status === 'fulfilled' && ping.value === 'pong';
-    status.deviceId = deviceId.status === 'fulfilled' && typeof deviceId.value === 'string' ? deviceId.value : '';
-    status.video = video.status === 'fulfilled' ? video.value : null;
-    status.usb = usb.status === 'fulfilled' ? usb.value ?? undefined : undefined;
-    status.keyboardLeds = keyboardLeds.status === 'fulfilled' ? keyboardLeds.value ?? undefined : undefined;
-    status.hostPower = status.video?.ready ? 'on / HDMI signal' : `unknown${status.video?.error ? ` (${status.video.error})` : ''}`;
-    status.latencyMs = Date.now() - started;
-  } catch (error) {
-    status.error = error instanceof Error ? error.message : String(error);
-    status.latencyMs = Date.now() - started;
+  const pcReachabilityPromise = getPcReachability(kvm);
+  const hostStatsPromise = getHostStats(kvm)
+    .then((stats) => ({ stats, error: '' }))
+    .catch((error: unknown) => ({ stats: null, error: error instanceof Error ? error.message : String(error) }));
+
+  if (resolvedKvmEndpoint(kvm).enabled) {
+    try {
+      await login(kvm);
+      status.authenticated = true;
+      const [ping, deviceId, video, usb, keyboardLeds] = await Promise.allSettled([
+        rpc<string>(kvm, 'ping'),
+        rpc<string>(kvm, 'getDeviceID'),
+        rpc<VideoState>(kvm, 'getVideoState'),
+        rpc<JsonValue>(kvm, 'getUSBState'),
+        rpc<JsonValue>(kvm, 'getKeyboardLedState')
+      ]);
+
+      status.kvmResponds = ping.status === 'fulfilled' && ping.value === 'pong';
+      status.deviceId = deviceId.status === 'fulfilled' && typeof deviceId.value === 'string' ? deviceId.value : '';
+      status.video = video.status === 'fulfilled' ? video.value : null;
+      status.usb = usb.status === 'fulfilled' ? usb.value ?? undefined : undefined;
+      status.keyboardLeds = keyboardLeds.status === 'fulfilled' ? keyboardLeds.value ?? undefined : undefined;
+      status.hostPower = status.video?.ready ? 'on / HDMI signal' : `unknown${status.video?.error ? ` (${status.video.error})` : ''}`;
+      status.latencyMs = Date.now() - started;
+    } catch (error) {
+      status.error = error instanceof Error ? error.message : String(error);
+      status.latencyMs = Date.now() - started;
+    }
+  } else {
+    status.hostPower = 'no KVM configured';
+    status.latencyMs = null;
   }
+
+  const pcReachability = await pcReachabilityPromise;
+  status.pcResponds = pcReachability.responds;
+  status.pcLatencyMs = pcReachability.latencyMs;
+  status.pcCheckedAt = pcReachability.checkedAt;
+  status.pcError = pcReachability.error;
+
+  const hostStatsResult = await hostStatsPromise;
+  status.hostStats = hostStatsResult.stats;
+  status.hostStatsError = hostStatsResult.error;
+
   return status;
 }
 
@@ -342,12 +636,14 @@ async function runAction(kvm: KvmConfigEntry, action: string, body: RequestBody 
     case 'usbWakeup':
       return rpc(kvm, 'sendUsbWakeupSignal');
     case 'wol': {
-      const macAddress = String(body.macAddress || kvm.hostMacAddress || '');
+      const macAddress = String(body.macAddress || ensureKvmEnabled(kvm).hostMacAddress || '');
       if (!macAddress) throw httpError('macAddress is required for Wake-on-LAN', 400);
       return rpc(kvm, 'sendWOLMagicPacket', { macAddress });
     }
     case 'arrowUp':
       return keyPress(kvm, 'ArrowUp');
+    case 'hostScript':
+      return runHostScript(kvm, body);
     case 'keyPress':
       return keyPress(kvm, body.key);
     case 'keyCombo':
@@ -423,6 +719,16 @@ app.get('/api/kvms/status', asyncHandler(async (_req, res) => {
 app.get('/api/kvms/:id/status', asyncHandler(async (req, res) => {
   const kvm = findKvm(routeParam(req.params.id, 'id'));
   res.json(await getStatus(kvm));
+}));
+
+app.get('/api/kvms/:id/host-stats', asyncHandler(async (req, res) => {
+  const kvm = findKvm(routeParam(req.params.id, 'id'));
+  res.json({ ok: true, stats: await getHostStats(kvm) });
+}));
+
+app.get('/api/kvms/:id/pc-status', asyncHandler(async (req, res) => {
+  const kvm = findKvm(routeParam(req.params.id, 'id'));
+  res.json({ ok: true, pc: await getPcReachability(kvm) });
 }));
 
 app.post('/api/kvms/:id/login', asyncHandler(async (req, res) => {

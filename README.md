@@ -1,167 +1,543 @@
 # LuckFox KVM Matrix
 
-A Matrix-themed web dashboard for controlling multiple LuckFox PicoKVM devices from one place.
+A Matrix-themed Vue/TypeScript dashboard for controlling LuckFox PicoKVM devices and/or host-agent-only machines from one place. It shows one rounded card per device, can show both the KVM IP and the PC/host-agent IP, tracks separate online status for the KVM and PC every 15 seconds, checks KVM/login/video/USB status when a KVM is enabled, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent. Devices without a physical KVM can set `kvm.enabled: false` or simply `kvm: false`; their cards keep PC status/stats/scripts and hide the KVM controls.
 
-The app gives you a card for each KVM, shows whether the KVM responds, shows practical host/video/USB status, opens the original KVM web interface, and sends common actions such as power button, reset, keyboard keys, mouse events, virtual media calls, Wake-on-LAN, and raw JSON-RPC.
-
-> **Important:** This app is intended for your private LAN or VPN. It stores KVM passwords in a local server-side config file and sends power/keyboard/mouse commands to your machines. Do not expose it directly to the public internet.
-
-![alt text](./readme/one.png)
+> **Security note:** This dashboard can send power, keyboard, mouse, virtual media, Wake-on-LAN, host-side script execution, reboot, and force power-off commands. Run it only on a trusted LAN/VPN. Do not expose the dashboard or the host-agent service directly to the public internet.
 
 ---
 
 ## Easiest way to run: Docker
 
-Docker is the recommended production path. It builds the Vue frontend, compiles the TypeScript Node proxy, and runs everything in one container on port `8787`.
-
-### 1. Clone the repository
+Docker is the recommended production path. It builds the Vue frontend, compiles the TypeScript Node backend, and serves the whole dashboard on port `8787`.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/luckfox-kvm-matrix.git
 cd luckfox-kvm-matrix
-```
+nano kvm.config.json
 
-### 2. Edit your KVM config
-
-Open `kvm.config.json` and set your KVM names, IPs, passwords, and notes.
-
-Example:
-
-```json
-{
-  "server": {
-    "port": 8787,
-    "requestTimeoutMs": 8000,
-    "pollIntervalMs": 15000
-  },
-  "kvms": [
-    {
-      "id": "lmde",
-      "name": "LMDE",
-      "ip": "192.168.10.91",
-      "password": "pass",
-      "notes": "Linux Mint Debian Edition host",
-      "hostMacAddress": ""
-    },
-    {
-      "id": "am4",
-      "name": "AM4",
-      "ip": "192.168.10.92",
-      "password": "pass",
-      "notes": "AM4 workstation / test host",
-      "hostMacAddress": ""
-    },
-    {
-      "id": "nas",
-      "name": "NAS",
-      "ip": "192.168.10.93",
-      "password": "pass",
-      "notes": "Storage server",
-      "hostMacAddress": ""
-    },
-    {
-      "id": "pcmain",
-      "name": "PCMAIN",
-      "ip": "192.168.10.94",
-      "password": "pass",
-      "notes": "Main PC",
-      "hostMacAddress": ""
-    }
-  ]
-}
-```
-
-### 3. Build and start
-
-```bash
 docker compose up -d --build
 ```
 
-### 4. Open the app
+Open:
 
 ```text
 http://localhost:8787
 ```
 
-### Useful Docker commands
+Useful Docker commands:
 
 ```bash
-# Show logs
+# Logs
 docker compose logs -f
 
-# Rebuild cleanly
+# Clean rebuild
 docker compose build --no-cache
 
 # Restart after editing kvm.config.json
-docker compose restart
+docker compose restart luckfox-kvm-matrix
 
-# Stop and remove the container
+# Stop
 docker compose down
 
-# Check backend health
+# Backend health
 docker exec luckfox-kvm-matrix wget -qO- http://127.0.0.1:8787/api/health
 ```
 
-### If the container cannot reach your KVM IPs
+If Docker fails with `dockerDesktopLinuxEngine`, Docker Desktop is not running. Start Docker Desktop and make sure it is using Linux containers.
 
-On some Linux hosts, Docker bridge networking may not be able to reach devices on your LAN. If the app loads but all KVM calls fail, edit `docker-compose.yaml`:
+---
+
+## Optional: FastAPI host agent for scripts and stats
+
+The dashboard itself does **not** execute Python on your machines. For host-side actions, run the included FastAPI **host agent** on the machine where the Python scripts should execute.
+
+The host agent provides:
+
+- `GET /health`
+- `GET /stats`
+- `GET /scripts`
+- `POST /run`
+
+The dashboard uses the same agent to show host stats under each PC card:
+
+The dashboard derives the displayed **PC IP** from `hostAgent.url`. For example, if the agent URL is `http://192.168.10.92:8799`, the card shows **PC IP: `192.168.10.92`** but still links that value to the full agent URL. Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` to show a separate **PC online/offline** badge beside the KVM online badge.
+
+- CPU usage, logical/physical cores, load average, frequency where visible
+- memory and swap usage
+- disk usage
+- uptime and boot time
+- hostname, OS, kernel, architecture
+- Docker/cgroup visibility
+- network counters
+- temperatures and battery when the host exposes them
+- top visible processes
+
+### Run dashboard plus a local test agent
+
+From the repo root:
+
+```bash
+docker compose --profile agent up -d --build
+```
+
+The local agent listens on:
+
+```text
+http://localhost:8799
+```
+
+Health check:
+
+```bash
+curl http://localhost:8799/health
+```
+
+Stats check:
+
+```bash
+curl -H "Authorization: Bearer change-me-agent-token" http://localhost:8799/stats
+```
+
+### Run the agent standalone on a target machine
+
+Copy only the `host-agent/` folder to the target PC, then run:
+
+```bash
+cd host-agent
+docker compose up -d --build
+```
+
+The agent will listen on:
+
+```text
+http://<target-machine-ip>:8799
+```
+
+---
+
+## Host-agent token
+
+The host-agent token is **not** from LuckFox. It is a shared secret you generate yourself.
+
+The same token must be set in two places:
+
+1. `AGENT_TOKEN` in the host-agent Docker Compose file.
+2. `hostAgent.token` in `kvm.config.json` for the matching PC.
+
+Generate a token:
+
+```bash
+# Linux/macOS/Git Bash
+openssl rand -hex 32
+```
+
+Or with Python, including on Windows:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Or PowerShell:
+
+```powershell
+[Convert]::ToHexString((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+```
+
+Set it in `host-agent/docker-compose.yaml`:
 
 ```yaml
 services:
-  luckfox-kvm-matrix:
-    network_mode: host
+  host-script-agent:
+    environment:
+      AGENT_TOKEN: "REPLACE_WITH_LONG_RANDOM_TOKEN"
 ```
 
-Then remove or comment the `ports:` section, because host networking uses the host port directly.
+Set the same value in `kvm.config.json`:
 
-> `network_mode: host` is mainly useful on Linux. Docker Desktop on Windows and macOS handles host networking differently, so prefer the default bridge setup there.
+```json
+"hostAgent": {
+  "enabled": true,
+  "url": "http://192.168.10.92:8799",
+  "token": "REPLACE_WITH_LONG_RANDOM_TOKEN",
+  "timeoutMs": 60000,
+  "scripts": [
+    {
+      "id": "host_action",
+      "label": "AM4 Default Script",
+      "description": "Main editable action script."
+    },
+    {
+      "id": "script2",
+      "label": "AM4 Example Script 2",
+      "description": "Second example script. Rename this to something meaningful."
+    },
+    {
+      "id": "power_off_force",
+      "label": "Force Power Off AM4",
+      "description": "Force powers off the host through the host agent."
+    },
+    {
+      "id": "reboot_pc",
+      "label": "Reboot AM4",
+      "description": "Reboots the host through the host agent."
+    }
+  ]
+}
+```
+
+Restart after changing tokens:
+
+```bash
+# on the target host running the agent
+cd host-agent
+docker compose up -d
+
+# on the dashboard host
+docker compose restart luckfox-kvm-matrix
+```
+
+Test the token:
+
+```bash
+curl -H "Authorization: Bearer REPLACE_WITH_LONG_RANDOM_TOKEN" http://192.168.10.92:8799/stats
+```
+
+A `401 Unauthorized` response means the Bearer token does not match `AGENT_TOKEN`.
+
+---
+
+## Multiple host scripts
+
+Each device card has a top-right **Scripts** dropdown. Every entry in `hostAgent.scripts[]` appears there with its readable label and description. This works even when `kvm.enabled` is `false`, so you can use the dashboard for script-only hosts that do not have a LuckFox KVM attached.
+
+The host agent runs scripts by `id`:
+
+```text
+script id: host_action      ->  host-agent/scripts/host_action.py
+script id: script2          ->  host-agent/scripts/script2.py
+script id: power_off_force  ->  host-agent/scripts/power_off_force.py
+script id: reboot_pc        ->  host-agent/scripts/reboot_pc.py
+script id: backup           ->  host-agent/scripts/backup.py
+```
+
+To add another script:
+
+1. Add a Python file in `host-agent/scripts/`, for example:
+
+```text
+host-agent/scripts/backup.py
+```
+
+2. Add a matching config entry under the target device:
+
+```json
+{
+  "id": "backup",
+  "label": "Run Backup",
+  "description": "Starts the local backup workflow.",
+  "timeoutMs": 120000
+}
+```
+
+3. Restart only the dashboard after editing `kvm.config.json`:
+
+```bash
+docker compose restart luckfox-kvm-matrix
+```
+
+You do **not** need to rebuild or restart the host agent after editing or adding files under `host-agent/scripts/`, because the directory is mounted into the container.
+
+Manual script test:
+
+```bash
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{
+    "scriptId": "script2",
+    "scriptLabel": "Example Script 2",
+    "kvm": {"id":"am4","name":"AM4","ip":"192.168.10.92"},
+    "payload": {"source":"manual"}
+  }'
+```
+
+The scripts receive context through stdin and environment variables.
+
+Stdin JSON:
+
+```json
+{
+  "script": { "id": "script2", "label": "Example Script 2", "path": "/scripts/script2.py" },
+  "kvm": { "id": "am4", "name": "AM4", "ip": "192.168.10.92" },
+  "payload": { "source": "manual" }
+}
+```
+
+Environment variables:
+
+```text
+HOST_SCRIPT_ID
+HOST_SCRIPT_LABEL
+HOST_SCRIPT_PATH
+KVM_ID
+KVM_NAME
+KVM_IP
+KVM_NOTES
+KVM_WEBSITE_URL
+KVM_PAYLOAD_JSON
+```
+
+---
+
+## Built-in reboot and force power-off scripts
+
+Version `1.3.4` includes two extra example scripts in the host agent:
+
+```text
+host-agent/scripts/power_off_force.py
+host-agent/scripts/reboot_pc.py
+```
+
+They are already listed in the example `kvm.config.json`, so they appear in the card's **Scripts** dropdown as readable actions such as **Force Power Off AM4** and **Reboot AM4**.
+
+These scripts are guarded by default. The agent will refuse to run them until this environment variable is enabled on the target host:
+
+```yaml
+services:
+  host-script-agent:
+    environment:
+      ALLOW_HOST_POWER_COMMANDS: "true"
+```
+
+For Linux hosts running the agent inside Docker, shutting down or rebooting the actual host usually also requires the agent container to run with host privileges. In `host-agent/docker-compose.yaml`, uncomment these lines only on trusted machines:
+
+```yaml
+services:
+  host-script-agent:
+    privileged: true
+    pid: host
+```
+
+Then restart the agent:
+
+```bash
+cd host-agent
+docker compose up -d
+```
+
+Manual tests:
+
+```bash
+# Reboot the host
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{"scriptId":"reboot_pc","scriptLabel":"Reboot PC"}'
+
+# Force power off the host
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{"scriptId":"power_off_force","scriptLabel":"Force Power Off"}'
+```
+
+You can override the exact commands without editing the script:
+
+```yaml
+environment:
+  POWER_OFF_COMMAND: "shutdown -h now"
+  REBOOT_COMMAND: "shutdown -r now"
+```
+
+On Docker Desktop for Windows/macOS, these scripts run inside the Linux container/VM view and usually cannot reboot or power off the physical host unless you replace them with a host-specific integration. For Windows hosts, use a native service, Task Scheduler, SSH, WinRM, or edit these scripts to call the mechanism you prefer.
+
+---
+
+## Host stats visibility in Docker
+
+A container can normally only report what Docker exposes to it. The provided compose files include read-only mounts for a better Linux host view:
+
+```yaml
+volumes:
+  - /proc:/host/proc:ro
+  - /:/host/root:ro
+```
+
+On Linux, this usually reports the actual host. On Docker Desktop for Windows/macOS, it may describe the Docker Linux VM rather than the physical Windows/macOS host.
+
+Remove those mounts if you only want container-visible stats.
+
+---
+
+## Configure devices
+
+Edit:
+
+```text
+kvm.config.json
+```
+
+There are two different secrets:
+
+- `kvm.password` is the LuckFox web/local password used with `POST /auth/login-local`.
+- `hostAgent.token` is the FastAPI host-agent Bearer token you generate yourself.
+
+The preferred config separates the physical KVM from the PC/host agent. This lets one dashboard card be either:
+
+- **KVM + host agent** — full LuckFox controls plus scripts/stats.
+- **Host-agent only** — no LuckFox KVM connected; the card shows PC online/stats/scripts and hides all KVM controls.
+
+### Normal KVM + host-agent device
+
+```json
+{
+  "id": "am4",
+  "name": "AM4",
+  "notes": "AM4 workstation / test host",
+  "kvm": {
+    "enabled": true,
+    "ip": "192.168.10.92",
+    "password": "pass",
+    "protocol": "http",
+    "hostMacAddress": ""
+  },
+  "hostAgent": {
+    "enabled": true,
+    "url": "http://192.168.10.92:8799",
+    "token": "change-me-agent-token",
+    "timeoutMs": 60000,
+    "scripts": [
+      {
+        "id": "host_action",
+        "label": "Run AM4 Script",
+        "description": "Default editable host action script."
+      },
+      {
+        "id": "script2",
+        "label": "AM4 Example Script 2",
+        "description": "Example second script. Rename this label to match the task."
+      },
+      {
+        "id": "power_off_force",
+        "label": "Force Power Off AM4",
+        "description": "Runs the host-agent force power-off script on this PC."
+      },
+      {
+        "id": "reboot_pc",
+        "label": "Reboot AM4",
+        "description": "Runs the host-agent reboot script on this PC."
+      }
+    ]
+  }
+}
+```
+
+### Host-agent-only device, no KVM attached
+
+Use this when the PC has a FastAPI host agent but no LuckFox KVM. The dashboard will still display the card, PC online status, host stats, and Scripts dropdown, but it will hide KVM IP, KVM online status, Open KVM, Power, Arrow Up, raw RPC, keyboard/mouse, virtual media, and other KVM-only controls. You can use either `"kvm": { "enabled": false }` or the shorter `"kvm": false`.
+
+```json
+{
+  "id": "scriptbox",
+  "name": "ScriptBox",
+  "notes": "Host-agent-only automation box",
+  "kvm": {
+    "enabled": false
+  },
+  "hostAgent": {
+    "enabled": true,
+    "url": "http://192.168.10.150:8799",
+    "token": "change-me-agent-token",
+    "timeoutMs": 60000,
+    "scripts": [
+      {
+        "id": "host_action",
+        "label": "Run ScriptBox Script",
+        "description": "Default editable host action script."
+      },
+      {
+        "id": "script2",
+        "label": "ScriptBox Maintenance",
+        "description": "Example second script for this host."
+      },
+      {
+        "id": "power_off_force",
+        "label": "Force Power Off ScriptBox",
+        "description": "Runs the host-agent force power-off script on this PC."
+      },
+      {
+        "id": "reboot_pc",
+        "label": "Reboot ScriptBox",
+        "description": "Runs the host-agent reboot script on this PC."
+      }
+    ]
+  }
+}
+```
+
+Field reference:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Stable internal id used by the app. Use lowercase letters/numbers/dashes. |
+| `name` | Display name shown on the card. |
+| `notes` | Free text shown on the card. |
+| `kvm.enabled` | Set `true` for a physical LuckFox KVM. Set `false` for host-agent-only devices. You can also set `kvm` itself to `false`. |
+| `kvm.ip` | LuckFox KVM IP address. Required only when `kvm.enabled` is true. |
+| `kvm.password` | LuckFox local web password used with `/auth/login-local`. Required only when `kvm.enabled` is true. |
+| `kvm.protocol` | Optional, `http` by default. Use `https` only if the KVM supports it. |
+| `kvm.hostMacAddress` | Optional MAC address for Wake-on-LAN. |
+| `hostAgent.enabled` | Enables/disables the host-agent integration. |
+| `hostAgent.url` | FastAPI agent URL on the target host. The dashboard displays only the hostname/IP part as **PC IP**. Example: `http://192.168.10.92:8799` displays as `192.168.10.92` and pings `http://192.168.10.92:8799/health` every refresh cycle. It may be different from the LuckFox KVM IP. |
+| `hostAgent.token` | Shared Bearer token sent to the FastAPI agent. |
+| `hostAgent.timeoutMs` | Default timeout for script runs. |
+| `hostAgent.scripts[].id` | Script id. Runs `/scripts/<id>.py` on the agent. |
+| `hostAgent.scripts[].label` | Human-readable dropdown text shown on the dashboard. |
+| `hostAgent.scripts[].description` | Optional helper text shown in the dropdown. |
+| `hostAgent.scripts[].timeoutMs` | Optional per-script timeout override. |
+
+Legacy configs using top-level `ip`, `password`, `protocol`, `hostMacAddress`, or single-script `hostScript` still work. New configs should prefer the nested `kvm` and `hostAgent.scripts[]` format.
 
 ---
 
 ## What this app does
 
-LuckFox KVM Matrix is a small two-part app:
+LuckFox KVM Matrix has three parts:
 
-1. A **Vue 3 + TypeScript frontend** that shows the Matrix-themed dashboard.
-2. A **Node/Express + TypeScript backend proxy** that talks to each LuckFox KVM over your LAN.
+1. **Vue 3 + TypeScript frontend** — Matrix dashboard and component UI.
+2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC when enabled, and calls host agents.
+3. **FastAPI host agent** — optional per-machine service for Python scripts and host stats.
 
-The browser talks only to the local backend. The backend talks to the KVMs.
+The browser talks only to the Node backend. The Node backend talks to enabled KVMs and configured host agents.
 
-This design is intentional:
-
-- KVM passwords stay out of the browser bundle.
-- Browser CORS restrictions do not block KVM requests.
-- Login cookies/sessions are managed server-side.
-- The UI can call one clean local API instead of directly calling four KVM devices.
+This avoids browser CORS problems, keeps KVM passwords out of the frontend bundle, and lets host scripts run only on machines where you explicitly deploy the agent.
 
 ---
 
 ## Features
 
 - Matrix-style dashboard theme.
-- Rounded card layout for each configured KVM.
-- Central JSON configuration for all KVMs.
-- KVM reachability status.
-- Authentication status.
-- Video/HDMI status using KVM video state.
-- USB status using KVM USB state.
-- Keyboard LED status when available.
-- Direct button to open each original KVM web page.
-- Power button action.
-- Reset button action.
-- Arrow Up shortcut to wake a screen or boot menu.
-- Ctrl+Alt+Del shortcut.
-- Custom key press.
-- Custom key combo.
-- Type text.
-- Mouse move/click/wheel panel.
-- Virtual media mount/unmount panel.
-- Wake-on-LAN support if `hostMacAddress` is configured.
-- USB wakeup action.
-- Reboot KVM device action.
-- Raw JSON-RPC panel for firmware-specific or experimental methods.
-- Jest tests for services and Vue components.
+- Rounded card layout per KVM.
+- Central JSON configuration.
+- Separate KVM and PC online badges on every card.
+- KVM IP when `kvm.enabled` is true, and clickable PC IP on every card with a host agent. The PC IP is derived from `hostAgent.url` without protocol or port.
+- PC reachability ping through host-agent `/health` every 15 seconds by default.
+- KVM responding/authenticated status.
+- Practical host power indicator based on HDMI/video readiness.
+- Video state, USB state, and keyboard LED state where available.
+- Host-agent stats under each PC card.
+- Top-right scripts dropdown per PC.
+- Multiple named host scripts per PC.
+- Direct button to open the original KVM website.
+- Power press, reset press, USB wakeup, Wake-on-LAN.
+- Arrow Up shortcut.
+- Ctrl+Alt+Del, custom key press, key combo, and typed text.
+- Mouse move/click/wheel controls.
+- Virtual media mount/unmount controls.
+- Reboot KVM action.
+- Raw JSON-RPC panel for firmware-specific methods.
 - Docker production build.
+- Jest tests and TypeScript checks.
 
 ---
 
@@ -185,9 +561,10 @@ luckfox-kvm-matrix/
 │   ├── App.vue
 │   ├── main.ts
 │   ├── styles.css
-│   ├── env.d.ts
 │   ├── components/
 │   │   ├── ActionButton.vue
+│   │   ├── HostScriptMenu.vue
+│   │   ├── HostStatsPanel.vue
 │   │   ├── KeyboardPanel.vue
 │   │   ├── KvmCard.vue
 │   │   ├── KvmGrid.vue
@@ -197,14 +574,23 @@ luckfox-kvm-matrix/
 │   │   ├── StatusBadge.vue
 │   │   ├── ToastStack.vue
 │   │   └── VirtualMediaPanel.vue
-│   ├── config/
-│   │   └── capabilities.ts
 │   ├── services/
 │   │   ├── formatters.ts
 │   │   └── kvmApi.ts
 │   └── types/
 │       ├── kvm.ts
 │       └── ui.ts
+├── host-agent/
+│   ├── Dockerfile
+│   ├── docker-compose.yaml
+│   ├── requirements.txt
+│   ├── app/
+│   │   └── main.py
+│   └── scripts/
+│       ├── host_action.py
+│       ├── script2.py
+│       ├── power_off_force.py
+│       └── reboot_pc.py
 └── __tests__/
     ├── KvmCard.test.ts
     ├── formatters.test.ts
@@ -217,362 +603,72 @@ luckfox-kvm-matrix/
 
 ## Main parts explained
 
-### `kvm.config.json`
-
-This is the main file you edit for your own setup.
-
-It contains:
-
-- backend port
-- request timeout
-- frontend polling interval
-- KVM list
-- KVM ID
-- KVM display name
-- KVM IP address
-- KVM password
-- notes
-- optional host MAC address for Wake-on-LAN
-
-The `password` field is the same password that works with:
-
-```http
-POST /auth/login-local
-```
-
-Example login payload used by the backend:
-
-```json
-{
-  "password": "pass"
-}
-```
-
-### `server/index.ts`
-
-This is the Node/Express backend.
-
-It handles:
-
-- loading `kvm.config.json`
-- serving the built Vue app from `dist/`
-- exposing local API routes under `/api`
-- logging into each KVM with `/auth/login-local`
-- storing KVM session cookies in memory
-- retrying login if a session expires
-- sending JSON-RPC calls to `/api/rpc`
-- normalizing errors so the frontend gets useful messages
-
-The backend is needed because direct browser-to-KVM calls can fail because of CORS, and because putting passwords in frontend code would be unsafe.
-
-### `server/types.ts`
-
-Shared backend TypeScript types for:
-
-- KVM config
-- server config
-- JSON-RPC payloads
-- action payloads
-- status responses
-
-### `src/main.ts`
-
-Vue app entry point. It mounts `App.vue` into `index.html`.
-
-### `src/App.vue`
-
-Top-level frontend screen.
-
-It handles:
-
-- loading the KVM list
-- polling status
-- calling actions
-- showing toast notifications
-- passing data down into components
-
-### `src/components/KvmGrid.vue`
-
-Grid layout for all configured KVM cards.
-
 ### `src/components/KvmCard.vue`
 
-Main card for one KVM.
+Renders one device card. When `kvm.enabled` is true, it shows KVM IP, KVM status, and all KVM controls. When `kvm.enabled` is false, it hides KVM-only UI and keeps clickable PC IP, PC online status, host stats, Refresh, Open PC Agent, and the top-right `HostScriptMenu` dropdown.
 
-It shows:
+### `src/components/HostScriptMenu.vue`
 
-- name
-- IP address
-- notes
-- online/offline status
-- authentication status
-- host/video state
-- USB state
-- last checked time
-- latency
-- buttons for common actions
+Renders the top-right Scripts dropdown for the configured `hostAgent.scripts[]` entries and emits the selected `scriptId`.
 
-### `src/components/ActionButton.vue`
+### `src/components/HostStatsPanel.vue`
 
-Reusable button component used across the app.
-
-It keeps action button styling and disabled/loading behavior consistent.
-
-### `src/components/StatusBadge.vue`
-
-Small status pill component used for online/auth/video/USB style indicators.
+Displays CPU, memory, disk, uptime, hostname, OS, Docker visibility, and extra host stats from the FastAPI agent.
 
 ### `src/components/KeyboardPanel.vue`
 
-Keyboard controls.
-
-It supports actions such as:
-
-- Arrow Up
-- Ctrl+Alt+Del
-- custom key press
-- key combinations
-- type text
+Sends keyboard actions through the backend: single key, combo, Ctrl+Alt+Del, typed text.
 
 ### `src/components/MousePanel.vue`
 
-Mouse controls.
-
-It supports actions such as:
-
-- move mouse
-- click button
-- scroll wheel
+Sends absolute mouse, relative mouse, click, and wheel reports.
 
 ### `src/components/VirtualMediaPanel.vue`
 
-Virtual media controls.
-
-It gives the UI for mounting and unmounting media through the KVM JSON-RPC interface.
-
-Exact behavior depends on the LuckFox/PicoKVM firmware version and how virtual media is configured on the KVM.
+Calls virtual-media KVM RPC methods for mounting/unmounting images.
 
 ### `src/components/RawRpcPanel.vue`
 
-Advanced raw JSON-RPC panel.
-
-Use this when your KVM firmware has a method that is not yet represented by a dedicated UI button.
-
-Example method:
-
-```json
-{
-  "method": "triggerPower",
-  "params": {}
-}
-```
-
-### `src/components/MatrixBackground.vue`
-
-Visual Matrix-style background effect.
-
-### `src/components/ToastStack.vue`
-
-Toast notification stack for success and error messages.
+Lets you call custom JSON-RPC methods for firmware-specific or experimental LuckFox/PicoKVM methods.
 
 ### `src/services/kvmApi.ts`
 
-Frontend API client.
+Frontend API client for the local Node backend under `/api`.
 
-It talks to the local backend routes, not directly to the KVM devices.
+### `server/index.ts`
 
-### `src/services/formatters.ts`
+Node/Express backend. It loads config, logs into each KVM, stores session cookies in memory, calls `/api/rpc`, maps dashboard actions to JSON-RPC, calls host-agent `/health`, `/run`, and `/stats`, and serves the built Vue app in production.
 
-Small formatting helpers for status labels, times, and display values.
+### `host-agent/app/main.py`
 
-### `src/types/kvm.ts`
+FastAPI agent. It verifies the Bearer token, lists scripts, runs selected scripts from `/scripts/<id>.py`, and returns host stats using `psutil`.
 
-Frontend KVM-related TypeScript interfaces.
+### `host-agent/scripts/host_action.py`
 
-### `src/types/ui.ts`
+Default editable script.
 
-Frontend UI-related TypeScript interfaces.
+### `host-agent/scripts/script2.py`
 
-### `src/config/capabilities.ts`
+Example second script showing how multiple named scripts work.
 
-Central list of known UI capabilities/actions. This keeps action labels and metadata separate from the components.
+### `host-agent/scripts/power_off_force.py`
 
-### `src/styles.css`
+Guarded script for force powering off the target host. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
 
-Global Matrix-style theme, layout, cards, buttons, panels, and responsive behavior.
+### `host-agent/scripts/reboot_pc.py`
 
----
-
-## Backend API
-
-The Vue app calls these local backend routes.
-
-### Health check
-
-```http
-GET /api/health
-```
-
-Returns basic backend health information.
-
-### List KVMs
-
-```http
-GET /api/kvms
-```
-
-Returns configured KVMs without exposing passwords.
-
-### Get all statuses
-
-```http
-GET /api/status
-```
-
-Checks all configured KVMs.
-
-### Get one status
-
-```http
-GET /api/status/:id
-```
-
-Checks one KVM by config ID.
-
-Example:
-
-```bash
-curl http://localhost:8787/api/status/am4
-```
-
-### Run action
-
-```http
-POST /api/kvms/:id/actions/:action
-```
-
-Example:
-
-```bash
-curl -X POST http://localhost:8787/api/kvms/am4/actions/power \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-### Raw JSON-RPC
-
-```http
-POST /api/kvms/:id/rpc
-```
-
-Example:
-
-```bash
-curl -X POST http://localhost:8787/api/kvms/am4/rpc \
-  -H "Content-Type: application/json" \
-  -d '{"method":"triggerPower","params":{}}'
-```
-
----
-
-## KVM JSON-RPC behavior
-
-The backend logs into each LuckFox KVM like this:
-
-```http
-POST http://KVM_IP/auth/login-local
-Content-Type: application/json
-
-{
-  "password": "pass"
-}
-```
-
-Then it sends JSON-RPC calls like this:
-
-```http
-POST http://KVM_IP/api/rpc
-Content-Type: application/json
-Cookie: session cookie from login
-
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "triggerPower",
-  "params": {}
-}
-```
-
-The app is built around the password-based local login flow because that is the flow confirmed to work with your KVMs.
-
----
-
-## Config reference
-
-### Server config
-
-```json
-"server": {
-  "port": 8787,
-  "requestTimeoutMs": 8000,
-  "pollIntervalMs": 15000
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `port` | Port used by the Node backend. |
-| `requestTimeoutMs` | Timeout for calls from backend to KVM devices. |
-| `pollIntervalMs` | Suggested frontend status polling interval. |
-
-### KVM config
-
-```json
-{
-  "id": "am4",
-  "name": "AM4",
-  "ip": "192.168.10.92",
-  "password": "pass",
-  "notes": "AM4 workstation / test host",
-  "hostMacAddress": ""
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `id` | Stable unique ID used in URLs and actions. Use lowercase letters, numbers, and dashes. |
-| `name` | Display name shown in the UI. |
-| `ip` | KVM IP address. Do not include `http://`. |
-| `password` | Password for `/auth/login-local`. |
-| `notes` | Human-friendly note shown on the card. |
-| `hostMacAddress` | Optional MAC address for Wake-on-LAN. Leave empty if unused. |
+Guarded script for rebooting the target host. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
 
 ---
 
 ## Local development
 
-### Requirements
-
-- Node.js `20.19.0` or newer
-- npm
-- Access to your LuckFox KVM LAN
-
-### Install dependencies
+Requires Node.js `20.19+` or `22.12+`.
 
 ```bash
 npm install
-```
-
-### Start development mode
-
-```bash
 npm run dev
 ```
-
-This starts both:
-
-- Vite frontend dev server
-- TypeScript Node backend in watch mode
 
 Open:
 
@@ -580,374 +676,196 @@ Open:
 http://localhost:5173
 ```
 
-In development, Vite proxies `/api` requests to the backend.
+During development:
 
-### Run only the frontend
+- Vite frontend: `5173`
+- Node backend: `8787`
+- Vite proxies `/api/*` to the backend
 
-```bash
-npm run client
-```
-
-### Run only the backend
+Run only backend:
 
 ```bash
 npm run server:dev
 ```
 
-### Backend health check
+Run only frontend:
 
 ```bash
-curl http://localhost:8787/api/health
+npm run client
 ```
 
 ---
 
-## Production without Docker
+## Testing and type checking
 
-You can also run it directly with Node.
-
-### Build
-
-```bash
-npm install
-npm run type-check
-npm run test
-npm run build
-```
-
-### Start
-
-```bash
-npm start
-```
-
-Open:
-
-```text
-http://localhost:8787
-```
-
-The production backend serves both:
-
-- the API proxy under `/api`
-- the built Vue app from `dist/`
-
----
-
-## Testing
-
-### Run all tests
+Run Jest tests:
 
 ```bash
 npm run test
 ```
 
-### Run tests in watch mode
+Watch tests:
 
 ```bash
 npm run test:watch
 ```
 
-### Type-check frontend and backend
+Run TypeScript checks:
 
 ```bash
 npm run type-check
 ```
 
-### Build production bundle
+Production build without Docker:
 
 ```bash
 npm run build
+npm start
 ```
 
-Recommended before pushing to GitHub:
-
-```bash
-npm run type-check
-npm run test
-npm run build
-```
-
----
-
-## Test files
-
-### `__tests__/KvmCard.test.ts`
-
-Tests the main KVM card component renders identity/status information and emits actions.
-
-### `__tests__/kvmApi.test.ts`
-
-Tests frontend API service behavior.
-
-### `__tests__/formatters.test.ts`
-
-Tests formatting helpers.
-
-### `__tests__/vueTransformer.cjs`
-
-Custom Jest transformer for Vue single-file components.
-
-### `__tests__/styleMock.cjs`
-
-Mocks CSS imports for Jest.
-
----
-
-## Docker details
-
-### Build image manually
-
-```bash
-docker build -t luckfox-kvm-matrix:latest .
-```
-
-### Run manually
-
-```bash
-docker run -d \
-  --name luckfox-kvm-matrix \
-  --restart unless-stopped \
-  -p 8787:8787 \
-  -v "$PWD/kvm.config.json:/app/kvm.config.json:ro" \
-  luckfox-kvm-matrix:latest
-```
-
-### Compose build
-
-```bash
-docker compose build
-```
-
-### Compose start
-
-```bash
-docker compose up -d
-```
-
-### Compose full rebuild
-
-```bash
-docker compose build --no-cache
- docker compose up -d
-```
-
-### Docker health check
-
-The Docker image includes a health check against:
+Production app listens on:
 
 ```text
-http://127.0.0.1:8787/api/health
-```
-
-Check health:
-
-```bash
-docker ps
+http://localhost:8787
 ```
 
 ---
 
-## Common actions
+## Backend API quick reference
 
-The UI exposes common KVM controls including:
+List configured KVMs:
 
-| UI action | Purpose |
-| --- | --- |
-| Open Website | Opens the original KVM web interface. |
-| Refresh | Rechecks one KVM status. |
-| Power | Sends a power-button press. |
-| Reset | Sends a reset-button press. |
-| Arrow Up | Sends keyboard Arrow Up, useful for waking displays or menus. |
-| Ctrl+Alt+Del | Sends a common reboot/login shortcut. |
-| Type Text | Sends text through keyboard emulation. |
-| Key Combo | Sends a custom keyboard combination. |
-| Mouse Move | Sends relative mouse movement. |
-| Mouse Click | Sends mouse button action. |
-| Mouse Wheel | Sends scroll wheel action. |
-| Wake-on-LAN | Sends WOL if a MAC address is configured. |
-| USB Wakeup | Attempts USB wakeup action. |
-| Virtual Media | Mount/unmount media through supported KVM RPC methods. |
-| Raw RPC | Sends a custom JSON-RPC method and params. |
+```http
+GET /api/kvms
+```
+
+All statuses, including KVM reachability, PC reachability, and host stats when configured:
+
+```http
+GET /api/kvms/status
+```
+
+One KVM status:
+
+```http
+GET /api/kvms/:id/status
+```
+
+Host-agent stats only:
+
+```http
+GET /api/kvms/:id/host-stats
+```
+
+PC/host-agent reachability only:
+
+```http
+GET /api/kvms/:id/pc-status
+```
+
+
+Run an action:
+
+```http
+POST /api/kvms/:id/action/:action
+```
+
+Examples:
+
+```bash
+curl -X POST http://localhost:8787/api/kvms/am4/action/power
+curl -X POST http://localhost:8787/api/kvms/am4/action/arrowUp
+curl -X POST http://localhost:8787/api/kvms/am4/action/hostScript \
+  -H "Content-Type: application/json" \
+  -d '{"scriptId":"script2"}'
+```
+
+Raw KVM JSON-RPC:
+
+```bash
+curl -X POST http://localhost:8787/api/kvms/am4/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"getVideoState","params":{}}'
+```
 
 ---
 
 ## Troubleshooting
 
-### Docker says `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`
+### Browser says HTTP 502
 
-Docker Desktop is not running or the Linux engine is not available.
-
-Fix:
-
-1. Open Docker Desktop.
-2. Wait until it says Docker is running.
-3. Use Linux containers.
-4. Run:
+Check the Node backend and whether it can reach the KVM/agent IPs:
 
 ```bash
-docker version
+curl http://127.0.0.1:8787/api/health
+curl http://127.0.0.1:8787/api/kvms
 ```
 
-You should see both `Client` and `Server` sections.
-
-If needed:
-
-```bash
-wsl --shutdown
-```
-
-Then restart Docker Desktop.
-
-### App opens but all KVMs are offline
-
-Check that the host running the app can reach the KVMs:
-
-```bash
-ping 192.168.10.92
-curl http://192.168.10.92
-```
-
-If running in Docker, also check from inside the container:
-
-```bash
-docker exec -it luckfox-kvm-matrix sh
-wget -qO- http://192.168.10.92
-```
-
-If the host can reach the KVMs but the container cannot, try Linux host networking as described above.
-
-### Request failed with HTTP 502
-
-This usually means the frontend could not get a useful response from the backend, or the backend could not reach/login to the target KVM.
-
-Check backend health:
-
-```bash
-curl http://localhost:8787/api/health
-```
-
-Check configured KVM list:
-
-```bash
-curl http://localhost:8787/api/kvms
-```
-
-Check one KVM status:
-
-```bash
-curl http://localhost:8787/api/status/am4
-```
-
-Check logs:
-
-```bash
-docker compose logs -f
-```
-
-### Login rejected by KVM
-
-Make sure the `password` in `kvm.config.json` is the same password that works with this curl command:
-
-```bash
-curl -i -c cookies.txt \
-  -H "Content-Type: application/json" \
-  -X POST "http://192.168.10.92/auth/login-local" \
-  -d '{"password":"pass"}'
-```
-
-Expected response:
-
-```json
-{
-  "message": "Login successful"
-}
-```
-
-### Power button works in API but PC does not turn on
-
-The KVM API can only trigger the KVM-side power-control output. The target PC still needs proper power-control wiring.
-
-Check:
-
-- LuckFox KVM Ext board or GPIO wiring is installed.
-- KVM power-control pins are connected to the motherboard `PWR_SW` front-panel pins.
-- The motherboard has standby power.
-- The KVM itself is powered.
-
-### Host power status is not exact
-
-The app uses video/HDMI readiness as the practical host-power signal. If HDMI has no signal, the host may be off, asleep, in BIOS display mode, or simply not outputting video.
-
-For exact power LED status, your firmware and wiring would need to expose a readable power LED or GPIO state through API/RPC.
-
----
-
-## Security notes
-
-- Do not commit real passwords to a public repository.
-- Prefer using a private repo if `kvm.config.json` contains real device details.
-- Consider committing a `kvm.config.example.json` and keeping your real `kvm.config.json` local.
-- Put this app behind a VPN such as WireGuard or Tailscale for remote access.
-- Do not port-forward this app or the KVM web interfaces directly to the internet.
-- Anyone who can access this dashboard may be able to power/reset/type into your machines.
-
----
-
-## Suggested GitHub setup
-
-For a public repository, use this pattern:
-
-1. Copy your real config to a private local file:
-
-```bash
-cp kvm.config.json kvm.config.local.json
-```
-
-2. Create a safe example config:
-
-```bash
-cp kvm.config.json kvm.config.example.json
-```
-
-3. Remove real passwords/IPs from `kvm.config.example.json`.
-
-4. Add local config files to `.gitignore`:
-
-```gitignore
-kvm.config.local.json
-.env
-```
-
-This project currently reads `kvm.config.json` by default. In Docker, you can mount whichever config file you want:
+On Linux, Docker bridge networking may not reach your LAN the way you expect. You can try host networking in `docker-compose.yaml`:
 
 ```yaml
-volumes:
-  - ./kvm.config.local.json:/app/kvm.config.json:ro
+network_mode: host
 ```
+
+When using host networking, remove/comment the `ports:` section.
+
+### KVM login fails
+
+The dashboard uses the same flow you tested manually:
+
+```http
+POST /auth/login-local
+{"password":"..."}
+```
+
+Use the LuckFox web/local password, not the host-agent token.
+
+
+### PC badge says offline
+
+The PC badge checks the configured `hostAgent.url` by calling `/health` from the Node backend every refresh cycle. Check from the dashboard host:
+
+```bash
+curl http://192.168.10.92:8799/health
+```
+
+If that fails, the PC may be off, the host-agent container may not be running, the port may be blocked by a firewall, or `hostAgent.url` may point to the wrong IP/port.
+
+### Host-agent returns 401
+
+Make sure these match exactly:
+
+- `AGENT_TOKEN` in the host-agent compose file
+- `hostAgent.token` in `kvm.config.json`
+
+### Host script missing
+
+The agent maps `scriptId` to `/scripts/<scriptId>.py`. If the dashboard sends `scriptId: "backup"`, the target host must have:
+
+```text
+host-agent/scripts/backup.py
+```
+
+The script id may contain only letters, numbers, underscores, and dashes.
+
+### Power action succeeds but PC does not turn on
+
+The LuckFox KVM power-control pins or Ext board must be wired to the motherboard `PWR_SW` pins. Without that wiring, the API request can succeed but the PC will not physically power on.
 
 ---
 
-## Scripts
+## Security recommendations
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Starts frontend and backend in development mode. |
-| `npm run client` | Starts only Vite frontend. |
-| `npm run server:dev` | Starts only backend with TypeScript watch. |
-| `npm run type-check` | Type-checks Vue frontend and Node backend. |
-| `npm run test` | Runs Jest tests. |
-| `npm run test:watch` | Runs Jest in watch mode. |
-| `npm run build` | Builds backend and frontend for production. |
-| `npm start` | Starts the compiled production backend. |
+- Keep `kvm.config.json` private because it contains KVM passwords and host-agent tokens.
+- Use long random host-agent tokens.
+- Run only on a private LAN or VPN.
+- Use firewall rules so only your dashboard machine can call host agents.
+- Avoid privileged containers unless a script truly needs it. The built-in reboot/power-off scripts are the main case where this may be needed.
+- Mount only the host directories your scripts actually need.
+- Do not commit real passwords or tokens to a public GitHub repo.
 
 ---
 
 ## License
-- GPL-3.0
 
----
-
-## Disclaimer
-
-This project sends remote control commands to physical computers. Use it carefully. Verify power/reset wiring before relying on it, and keep the dashboard restricted to trusted networks and users.
+Add your preferred license here.

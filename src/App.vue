@@ -6,14 +6,14 @@
         <p class="eyebrow">LuckFox PicoKVM Control</p>
         <h1>KVM Matrix</h1>
         <p class="muted">
-          Local dashboard for LMDE, AM4, NAS, and PCMAIN. Passwords stay server-side in <code>kvm.config.json</code>.
+          Local dashboard for LuckFox KVMs and host-agent-only PCs. Passwords and agent tokens stay server-side in <code>kvm.config.json</code>.
         </p>
       </div>
       <div class="hero-actions">
         <button class="btn primary" :disabled="loading" @click="refreshStatuses">
           {{ loading ? 'Scanning…' : 'Refresh all' }}
         </button>
-        <span class="tiny">Auto refresh: {{ Math.round(pollIntervalMs / 1000) }}s</span>
+        <span class="tiny">Auto refresh / PC ping: {{ Math.round(pollIntervalMs / 1000) }}s</span>
       </div>
     </header>
 
@@ -102,8 +102,22 @@ async function refreshOne(id: string): Promise<void> {
   }
 }
 
+function busyKeyFor(action: string, payload: ActionPayload): string {
+  if (action === 'hostScript' && typeof payload.scriptId === 'string') {
+    return `hostScript:${payload.scriptId}`;
+  }
+  return action;
+}
+
+function actionToastLabel(action: string, payload: ActionPayload): string {
+  if (action === 'hostScript' && typeof payload.scriptLabel === 'string') {
+    return payload.scriptLabel;
+  }
+  return action;
+}
+
 async function handleAction({ id, action, payload }: KvmActionEvent): Promise<void> {
-  busyMap[id] = action;
+  busyMap[id] = busyKeyFor(action, payload);
   try {
     if (action === 'rawRpc') {
       const method = typeof payload.method === 'string' ? payload.method : '';
@@ -111,7 +125,8 @@ async function handleAction({ id, action, payload }: KvmActionEvent): Promise<vo
     } else {
       await runKvmAction(id, action, payload);
     }
-    addToast(`${id}: ${action} sent`, action.includes('reset') || action.includes('reboot') ? 'warn' : 'good');
+    const toastLabel = actionToastLabel(action, payload);
+    addToast(`${id}: ${toastLabel} sent`, action.includes('reset') || action.includes('reboot') ? 'warn' : 'good');
     await refreshOne(id);
   } catch (err) {
     addToast(`${id}: ${errorMessage(err)}`, 'bad');

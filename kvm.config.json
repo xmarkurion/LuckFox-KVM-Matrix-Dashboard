@@ -8,34 +8,162 @@
     {
       "id": "lmde",
       "name": "LMDE",
-      "ip": "192.168.10.91",
-      "password": "acca12",
       "notes": "Linux Mint Debian Edition host",
-      "hostMacAddress": ""
+      "hostAgent": {
+        "enabled": true,
+        "url": "http://192.168.10.91:8799",
+        "token": "change-me-agent-token",
+        "timeoutMs": 60000,
+        "scripts": [
+          {
+            "id": "host_action",
+            "label": "Run LMDE Script",
+            "description": "Default editable host action script."
+          },
+          {
+            "id": "script2",
+            "label": "LMDE Example Script 2",
+            "description": "Example second script. Rename this label to match the task."
+          },
+          {
+            "id": "power_off_force",
+            "label": "Force Power Off LMDE",
+            "description": "Runs the host-agent force power-off script on this PC."
+          },
+          {
+            "id": "reboot_pc",
+            "label": "Reboot LMDE",
+            "description": "Runs the host-agent reboot script on this PC."
+          }
+        ]
+      },
+      "kvm": {
+        "enabled": true,
+        "ip": "192.168.10.91",
+        "password": "pass",
+        "protocol": "http",
+        "hostMacAddress": ""
+      }
     },
     {
       "id": "am4",
       "name": "AM4",
-      "ip": "192.168.10.92",
-      "password": "acca12",
       "notes": "AM4 workstation / test host",
-      "hostMacAddress": ""
+      "hostAgent": {
+        "enabled": true,
+        "url": "http://192.168.10.92:8799",
+        "token": "change-me-agent-token",
+        "timeoutMs": 60000,
+        "scripts": [
+          {
+            "id": "host_action",
+            "label": "Run AM4 Script",
+            "description": "Default editable host action script."
+          },
+          {
+            "id": "script2",
+            "label": "AM4 Example Script 2",
+            "description": "Example second script. Rename this label to match the task."
+          },
+          {
+            "id": "power_off_force",
+            "label": "Force Power Off AM4",
+            "description": "Runs the host-agent force power-off script on this PC."
+          },
+          {
+            "id": "reboot_pc",
+            "label": "Reboot AM4",
+            "description": "Runs the host-agent reboot script on this PC."
+          }
+        ]
+      },
+      "kvm": {
+        "enabled": true,
+        "ip": "192.168.10.92",
+        "password": "pass",
+        "protocol": "http",
+        "hostMacAddress": ""
+      }
     },
     {
       "id": "nas",
       "name": "NAS",
-      "ip": "192.168.10.93",
-      "password": "acca12",
       "notes": "Storage server",
-      "hostMacAddress": ""
+      "hostAgent": {
+        "enabled": true,
+        "url": "http://192.168.10.93:8799",
+        "token": "change-me-agent-token",
+        "timeoutMs": 60000,
+        "scripts": [
+          {
+            "id": "host_action",
+            "label": "Run NAS Script",
+            "description": "Default editable host action script."
+          },
+          {
+            "id": "script2",
+            "label": "NAS Example Script 2",
+            "description": "Example second script. Rename this label to match the task."
+          },
+          {
+            "id": "power_off_force",
+            "label": "Force Power Off NAS",
+            "description": "Runs the host-agent force power-off script on this PC."
+          },
+          {
+            "id": "reboot_pc",
+            "label": "Reboot NAS",
+            "description": "Runs the host-agent reboot script on this PC."
+          }
+        ]
+      },
+      "kvm": {
+        "enabled": true,
+        "ip": "192.168.10.93",
+        "password": "pass",
+        "protocol": "http",
+        "hostMacAddress": ""
+      }
     },
     {
       "id": "pcmain",
       "name": "PCMAIN",
-      "ip": "192.168.10.94",
-      "password": "acca12",
       "notes": "Main PC",
-      "hostMacAddress": ""
+      "hostAgent": {
+        "enabled": true,
+        "url": "http://192.168.10.94:8799",
+        "token": "change-me-agent-token",
+        "timeoutMs": 60000,
+        "scripts": [
+          {
+            "id": "host_action",
+            "label": "Run PCMAIN Script",
+            "description": "Default editable host action script."
+          },
+          {
+            "id": "script2",
+            "label": "PCMAIN Example Script 2",
+            "description": "Example second script. Rename this label to match the task."
+          },
+          {
+            "id": "power_off_force",
+            "label": "Force Power Off PCMAIN",
+            "description": "Runs the host-agent force power-off script on this PC."
+          },
+          {
+            "id": "reboot_pc",
+            "label": "Reboot PCMAIN",
+            "description": "Runs the host-agent reboot script on this PC."
+          }
+        ]
+      },
+      "kvm": {
+        "enabled": true,
+        "ip": "192.168.10.94",
+        "password": "pass",
+        "protocol": "http",
+        "hostMacAddress": ""
+      }
     }
   ]
 }

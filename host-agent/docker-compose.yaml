@@ -1,0 +1,31 @@
+services:
+  host-script-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luckfox-host-script-agent
+    restart: unless-stopped
+    # Linux host power/reboot scripts may need these uncommented so commands target the host, not only the container.
+    # Use only on trusted machines.
+    # privileged: true
+    # pid: host
+    ports:
+      - "8799:8799"
+    environment:
+      AGENT_TOKEN: change-me-agent-token
+      SCRIPTS_DIR: /scripts
+      DEFAULT_SCRIPT_ID: host_action
+      SCRIPT_TIMEOUT_SECONDS: 60
+      HOST_PROC_PATH: /host/proc
+      HOST_ROOT_PATH: /host/root
+      STATS_MAX_PROCESSES: 8
+      # Safety guard for power_off_force.py and reboot_pc.py.
+      # Change to "true" only on trusted hosts where you want the agent to shut down/reboot the host.
+      ALLOW_HOST_POWER_COMMANDS: "false"
+    volumes:
+      # Edit or add scripts/*.py on the host whenever you need to change behavior.
+      - ./scripts:/scripts
+      # Optional host-stat mounts. These are read-only and let the agent report the host view,
+      # not just the container view. Remove them if you only want container-visible stats.
+      - /proc:/host/proc:ro
+      - /:/host/root:ro

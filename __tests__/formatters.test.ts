@@ -1,4 +1,4 @@
-import { statusTone, usbLabel, videoLabel } from '../src/services/formatters';
+import { bytesLabel, percentLabel, statusTone, uptimeLabel, usbLabel, videoLabel } from '../src/services/formatters';
 
 describe('formatters', () => {
   test('statusTone returns good when KVM responds', () => {
@@ -15,5 +15,17 @@ describe('formatters', () => {
 
   test('usbLabel handles raw string states', () => {
     expect(usbLabel('configured')).toBe('configured');
+  });
+
+  test('bytesLabel formats binary units', () => {
+    expect(bytesLabel(1073741824)).toBe('1.0 GB');
+  });
+
+  test('percentLabel formats one decimal place when needed', () => {
+    expect(percentLabel(12.55)).toBe('12.6%');
+  });
+
+  test('uptimeLabel formats days and hours', () => {
+    expect(uptimeLabel(90000)).toBe('1d 1h');
   });
 });
