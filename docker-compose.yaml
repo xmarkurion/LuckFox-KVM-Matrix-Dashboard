@@ -35,8 +35,8 @@ services:
       dockerfile: Dockerfile
     container_name: luckfox-host-script-agent
     restart: unless-stopped
-    # Linux host power/reboot scripts may need these uncommented so commands target the host, not only the container.
-    # Use only on trusted machines.
+    # Linux host power/reboot scripts need these so commands target the host, not only the container.
+    # Use only on trusted machines. Recreate the container after changing these.
     # privileged: true
     # pid: host
     ports:
@@ -52,6 +52,8 @@ services:
       # Safety guard for power_off_force.py and reboot_pc.py.
       # Change to "true" only on trusted hosts where you want the agent to shut down/reboot the host.
       ALLOW_HOST_POWER_COMMANDS: "false"
+      # Optional last-resort Linux SysRq fallback. This is abrupt. Enable only if normal shutdown/reboot methods fail.
+      ALLOW_SYSRQ_FORCE: "false"
     volumes:
       - ./host-agent/scripts:/scripts
       # Optional host-stat mounts. These are read-only and let the agent report the host view,

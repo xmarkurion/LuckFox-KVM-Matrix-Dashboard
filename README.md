@@ -291,16 +291,16 @@ KVM_PAYLOAD_JSON
 
 ## Built-in reboot and force power-off scripts
 
-Version `1.3.4` includes two extra example scripts in the host agent:
+Version `1.3.5` includes two guarded host power scripts:
 
 ```text
 host-agent/scripts/power_off_force.py
 host-agent/scripts/reboot_pc.py
 ```
 
-They are already listed in the example `kvm.config.json`, so they appear in the card's **Scripts** dropdown as readable actions such as **Force Power Off AM4** and **Reboot AM4**.
+They are listed in the example `kvm.config.json`, so they appear in each card's **Scripts** dropdown as readable actions such as **Force Power Off AM4** and **Reboot AM4**.
 
-These scripts are guarded by default. The agent will refuse to run them until this environment variable is enabled on the target host:
+These scripts are guarded by default. The agent refuses to run them until this environment variable is enabled on the target host:
 
 ```yaml
 services:
@@ -318,11 +318,25 @@ services:
     pid: host
 ```
 
-Then restart the agent:
+After changing compose, recreate the container. A simple restart may keep the old container settings:
 
 ```bash
 cd host-agent
-docker compose up -d
+docker compose up -d --force-recreate --build
+```
+
+Verify the running container really has the setting:
+
+```bash
+docker exec luckfox-host-script-agent printenv ALLOW_HOST_POWER_COMMANDS
+docker inspect luckfox-host-script-agent --format '{{.HostConfig.Privileged}} {{.HostConfig.PidMode}}'
+```
+
+Expected output:
+
+```text
+true
+true host
 ```
 
 Manual tests:
@@ -341,12 +355,21 @@ curl -X POST http://127.0.0.1:8799/run \
   -d '{"scriptId":"power_off_force","scriptLabel":"Force Power Off"}'
 ```
 
+The scripts now try multiple Linux methods instead of stopping after the first failure. The JSON output contains an `attempts` list showing each command, exit code, stdout, and stderr.
+
 You can override the exact commands without editing the script:
 
 ```yaml
 environment:
   POWER_OFF_COMMAND: "shutdown -h now"
   REBOOT_COMMAND: "shutdown -r now"
+```
+
+If LMDE still refuses normal shutdown/reboot commands from Docker, there is an optional last-resort Linux SysRq fallback. This is abrupt, so only enable it on a trusted host where you accept immediate force power/reboot behavior:
+
+```yaml
+environment:
+  ALLOW_SYSRQ_FORCE: "true"
 ```
 
 On Docker Desktop for Windows/macOS, these scripts run inside the Linux container/VM view and usually cannot reboot or power off the physical host unless you replace them with a host-specific integration. For Windows hosts, use a native service, Task Scheduler, SSH, WinRM, or edit these scripts to call the mechanism you prefer.

@@ -145,10 +145,24 @@ services:
     pid: host
 ```
 
-Restart the agent after changing compose:
+After changing compose, recreate the container. A simple restart may keep old settings:
 
 ```bash
-docker compose up -d
+docker compose up -d --force-recreate --build
+```
+
+Verify the running container really received the settings:
+
+```bash
+docker exec luckfox-host-script-agent printenv ALLOW_HOST_POWER_COMMANDS
+docker inspect luckfox-host-script-agent --format '{{.HostConfig.Privileged}} {{.HostConfig.PidMode}}'
+```
+
+Expected output:
+
+```text
+true
+true host
 ```
 
 Manual tests:
@@ -165,12 +179,21 @@ curl -X POST http://127.0.0.1:8799/run \
   -d '{"scriptId":"power_off_force","scriptLabel":"Force Power Off"}'
 ```
 
+The scripts try multiple Linux methods and return an `attempts` list with each command, exit code, stdout, and stderr. This is useful when a host returns `exitCode: 2`.
+
 Optional command overrides:
 
 ```yaml
 environment:
   POWER_OFF_COMMAND: "shutdown -h now"
   REBOOT_COMMAND: "shutdown -r now"
+```
+
+Optional last-resort Linux SysRq fallback. This is abrupt, so only enable it on trusted hosts where immediate force power/reboot behavior is acceptable:
+
+```yaml
+environment:
+  ALLOW_SYSRQ_FORCE: "true"
 ```
 
 On Docker Desktop for Windows/macOS, these scripts usually affect only the Linux container/VM view, not the physical host, unless you replace them with a host-specific integration.

@@ -6,8 +6,9 @@ Set ALLOW_HOST_POWER_COMMANDS=true in the host-agent container environment befor
 using it. When the agent runs inside Docker on Linux, host shutdown usually also
 requires the container to run with `privileged: true` and `pid: host`.
 
-Optional override:
+Optional overrides:
   POWER_OFF_COMMAND="/path/to/your-command arg1 arg2"
+  ALLOW_SYSRQ_FORCE=true  # last-resort immediate kernel poweroff fallback
 """
 
 from __future__ import annotations
@@ -20,7 +21,11 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+
+SUCCESS_CODES = {0}
 
 
 def bool_env(name: str) -> bool:
@@ -45,65 +50,158 @@ def command_candidates() -> list[list[str]]:
 
     candidates: list[list[str]] = []
 
-    # Best Docker/Linux host option when the container has pid: host + enough privileges.
+    # Docker/Linux host options. With pid: host + privileged, these target host namespaces.
     if shutil.which("nsenter"):
+        nsenter_prefix = ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--"]
         candidates.extend([
-            ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "systemctl", "poweroff", "--force", "--force"],
-            ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "shutdown", "-h", "now"],
-            ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "poweroff", "-f"],
+            [*nsenter_prefix, "systemctl", "poweroff", "--force", "--force"],
+            [*nsenter_prefix, "shutdown", "-P", "now"],
+            [*nsenter_prefix, "shutdown", "-h", "now"],
+            [*nsenter_prefix, "poweroff", "-f"],
+            [*nsenter_prefix, "halt", "-p", "-f"],
         ])
 
+    # Direct options. These can affect the host when the container is in the host PID namespace
+    # and has CAP_SYS_BOOT, usually via privileged: true.
     candidates.extend([
         ["systemctl", "poweroff", "--force", "--force"],
+        ["shutdown", "-P", "now"],
         ["shutdown", "-h", "now"],
         ["poweroff", "-f"],
+        ["halt", "-p", "-f"],
     ])
     return candidates
 
 
-def run_first_available(commands: list[list[str]]) -> tuple[list[str], int, str, str]:
-    errors: list[str] = []
+def run_all_until_success(commands: list[list[str]]) -> tuple[bool, list[dict[str, Any]]]:
+    attempts: list[dict[str, Any]] = []
     for command in commands:
         binary = command[0]
         if shutil.which(binary) is None:
-            errors.append(f"missing binary: {binary}")
+            attempts.append({
+                "command": command,
+                "exitCode": 127,
+                "stdout": "",
+                "stderr": f"missing binary: {binary}",
+            })
             continue
         try:
             completed = subprocess.run(command, text=True, capture_output=True, timeout=10, check=False)
-            return command, completed.returncode, completed.stdout, completed.stderr
+            attempt = {
+                "command": command,
+                "exitCode": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+            attempts.append(attempt)
+            if completed.returncode in SUCCESS_CODES:
+                return True, attempts
         except subprocess.TimeoutExpired as exc:
-            return command, 124, exc.stdout or "", f"Command timed out: {' '.join(command)}"
+            attempts.append({
+                "command": command,
+                "exitCode": 124,
+                "stdout": exc.stdout or "",
+                "stderr": f"Command timed out: {' '.join(command)}",
+            })
         except OSError as exc:
-            errors.append(f"{' '.join(command)} -> {exc}")
-    return [], 127, "", "; ".join(errors) or "No usable power-off command found"
+            attempts.append({
+                "command": command,
+                "exitCode": 126,
+                "stdout": "",
+                "stderr": str(exc),
+            })
+    return False, attempts
+
+
+def write_sysrq(value: str, attempts: list[dict[str, Any]]) -> bool:
+    """Last-resort host poweroff via Linux SysRq.
+
+    This is intentionally opt-in via ALLOW_SYSRQ_FORCE=true because it is abrupt.
+    With pid: host, /proc/sysrq-trigger is the host procfs. If HOST_PROC_PATH is
+    mounted read-write, /host/proc/sysrq-trigger can also be used.
+    """
+    candidates = [Path("/proc/sysrq-trigger")]
+    host_proc = os.getenv("HOST_PROC_PATH", "/host/proc")
+    if host_proc:
+        candidates.append(Path(host_proc) / "sysrq-trigger")
+
+    for candidate in candidates:
+        try:
+            candidate.write_text(value, encoding="utf-8")
+            attempts.append({
+                "command": ["write", str(candidate), value],
+                "exitCode": 0,
+                "stdout": "",
+                "stderr": "",
+            })
+            return True
+        except OSError as exc:
+            attempts.append({
+                "command": ["write", str(candidate), value],
+                "exitCode": 126,
+                "stdout": "",
+                "stderr": str(exc),
+            })
+    return False
+
+
+def try_sysrq_poweroff(attempts: list[dict[str, Any]]) -> bool:
+    if not bool_env("ALLOW_SYSRQ_FORCE"):
+        attempts.append({
+            "command": ["sysrq", "poweroff"],
+            "exitCode": 2,
+            "stdout": "",
+            "stderr": "Skipped last-resort SysRq poweroff. Set ALLOW_SYSRQ_FORCE=true to enable it.",
+        })
+        return False
+
+    # Try to enable SysRq, sync disks, remount read-only, then power off.
+    try:
+        Path("/proc/sys/kernel/sysrq").write_text("1", encoding="utf-8")
+        attempts.append({"command": ["write", "/proc/sys/kernel/sysrq", "1"], "exitCode": 0, "stdout": "", "stderr": ""})
+    except OSError as exc:
+        attempts.append({"command": ["write", "/proc/sys/kernel/sysrq", "1"], "exitCode": 126, "stdout": "", "stderr": str(exc)})
+
+    for key in ["s", "u", "o"]:
+        ok = write_sysrq(key, attempts)
+        if not ok:
+            return False
+    return True
 
 
 def main() -> int:
     context = load_context()
+    script_id = context.get("script", {}).get("id") or os.getenv("HOST_SCRIPT_ID", "power_off_force")
+    script_label = context.get("script", {}).get("label") or os.getenv("HOST_SCRIPT_LABEL", "Force Power Off")
+
     if not bool_env("ALLOW_HOST_POWER_COMMANDS"):
         print(json.dumps({
             "ok": False,
             "at": datetime.now(timezone.utc).isoformat(),
-            "scriptId": context.get("script", {}).get("id") or os.getenv("HOST_SCRIPT_ID", "power_off_force"),
-            "scriptLabel": context.get("script", {}).get("label") or os.getenv("HOST_SCRIPT_LABEL", "Force Power Off"),
-            "message": "Blocked. Set ALLOW_HOST_POWER_COMMANDS=true in host-agent/docker-compose.yaml to enable host shutdown scripts.",
-            "hint": "On Linux Docker hosts, you may also need privileged: true and pid: host for the host, not just the container, to shut down.",
+            "scriptId": script_id,
+            "scriptLabel": script_label,
+            "message": "Blocked. ALLOW_HOST_POWER_COMMANDS is not true inside the running container.",
+            "currentValue": os.getenv("ALLOW_HOST_POWER_COMMANDS", ""),
+            "hint": "After editing docker-compose.yaml, recreate the agent: docker compose up -d --force-recreate --build. Verify with: docker exec luckfox-host-script-agent printenv ALLOW_HOST_POWER_COMMANDS",
         }, indent=2))
         return 2
 
-    command, exit_code, stdout, stderr = run_first_available(command_candidates())
+    ok, attempts = run_all_until_success(command_candidates())
+    if not ok:
+        ok = try_sysrq_poweroff(attempts)
+
+    last_exit_code = 0 if ok else (attempts[-1]["exitCode"] if attempts else 127)
     print(json.dumps({
-        "ok": exit_code == 0,
+        "ok": ok,
         "at": datetime.now(timezone.utc).isoformat(),
-        "scriptId": context.get("script", {}).get("id") or os.getenv("HOST_SCRIPT_ID", "power_off_force"),
-        "scriptLabel": context.get("script", {}).get("label") or os.getenv("HOST_SCRIPT_LABEL", "Force Power Off"),
+        "scriptId": script_id,
+        "scriptLabel": script_label,
         "kvm": context.get("kvm", {}),
-        "command": command,
-        "exitCode": exit_code,
-        "stdout": stdout,
-        "stderr": stderr,
+        "message": "Power-off command accepted." if ok else "All power-off methods failed. See attempts for stderr and exit codes.",
+        "attempts": attempts,
+        "hint": "For LMDE/Linux Docker hosts, use privileged: true, pid: host, then recreate the container. If normal methods fail, set ALLOW_SYSRQ_FORCE=true for abrupt last-resort poweroff.",
     }, indent=2))
-    return exit_code
+    return int(last_exit_code)
 
 
 if __name__ == "__main__":
