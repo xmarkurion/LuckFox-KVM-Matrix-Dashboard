@@ -13,7 +13,7 @@
         <button class="btn primary" :disabled="loading" @click="refreshStatuses">
           {{ loading ? 'Scanning…' : 'Refresh all' }}
         </button>
-        <span class="tiny">Auto refresh: {{ Math.round(pollIntervalMs / 1000) }}s</span>
+        <span class="tiny">Auto refresh / PC ping: {{ Math.round(pollIntervalMs / 1000) }}s</span>
       </div>
     </header>
 

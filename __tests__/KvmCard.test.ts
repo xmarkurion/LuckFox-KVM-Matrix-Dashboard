@@ -8,6 +8,8 @@ const kvm: KvmSummary = {
   ip: '192.168.10.92',
   notes: 'AM4 workstation',
   websiteUrl: 'http://192.168.10.92',
+  pcUrl: 'http://192.168.10.92:8799',
+  pcIp: '192.168.10.92',
   hasWolMac: false,
   hasHostScript: true,
   hostScriptLabel: 'Run AM4 Script',
@@ -21,6 +23,10 @@ const status: KvmStatus = {
   ...kvm,
   kvmResponds: true,
   authenticated: true,
+  pcResponds: true,
+  pcLatencyMs: 18,
+  pcCheckedAt: new Date().toISOString(),
+  pcError: '',
   hostPower: 'on / HDMI signal',
   video: { ready: true, width: 1920, height: 1080, fps: 60 },
   usb: 'configured',
@@ -49,8 +55,13 @@ describe('KvmCard', () => {
     const wrapper = mount(KvmCard, { props: { kvm, status, busy: '' } });
 
     expect(wrapper.text()).toContain('AM4');
+    expect(wrapper.text()).toContain('KVM IP:');
     expect(wrapper.text()).toContain('192.168.10.92');
-    expect(wrapper.text()).toContain('online');
+    expect(wrapper.text()).toContain('PC IP:');
+    expect(wrapper.text()).toContain('192.168.10.92');
+    expect(wrapper.text()).not.toContain('http://192.168.10.92:8799');
+    expect(wrapper.text()).toContain('KVM online');
+    expect(wrapper.text()).toContain('PC online');
     expect(wrapper.text()).toContain('1920×1080');
     expect(wrapper.text()).toContain('am4-host');
     expect(wrapper.text()).toContain('CPU');

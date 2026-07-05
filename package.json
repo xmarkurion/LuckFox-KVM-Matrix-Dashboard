@@ -1,6 +1,6 @@
 {
   "name": "luckfox-kvm-matrix",
-  "version": "1.3.0",
+  "version": "1.3.2",
   "private": true,
   "description": "Matrix themed Vue/TypeScript dashboard for multiple LuckFox PicoKVM devices.",
   "scripts": {

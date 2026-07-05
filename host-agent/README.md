@@ -1,11 +1,15 @@
 # LuckFox Host Script Agent
 
-FastAPI service that runs on a target machine and gives the LuckFox KVM Matrix dashboard two optional features:
+FastAPI service that runs on a target machine and gives the LuckFox KVM Matrix dashboard three optional features:
 
 1. Run named Python scripts from a mounted `scripts/` directory.
 2. Return host stats such as CPU, memory, disks, uptime, OS, Docker/cgroup visibility, network counters, temperatures, battery, and top processes when visible from Docker.
+3. Provide a lightweight `GET /health` endpoint that the dashboard pings every 15 seconds by default to show the PC online/offline badge.
 
 The dashboard calls this service only when a KVM entry has `hostAgent` configured.
+
+The dashboard derives the card's **PC IP** value from `hostAgent.url`. For example, if `hostAgent.url` is `http://192.168.10.92:8799`, the card shows **PC IP: `192.168.10.92`** and still uses `http://192.168.10.92:8799/health` for the PC online check.
+
 
 ---
 
@@ -21,7 +25,7 @@ The agent listens on:
 http://<target-machine-ip>:8799
 ```
 
-Health check:
+Health check used by the PC online badge:
 
 ```bash
 curl http://127.0.0.1:8799/health

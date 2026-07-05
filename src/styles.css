@@ -150,6 +150,47 @@ code { color: var(--green); }
 .card-header { margin-bottom: 12px; }
 .card-header h2 { font-size: 30px; }
 
+
+.online-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ip-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 255, 123, 0.14);
+  background: rgba(0, 0, 0, 0.22);
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+}
+
+.ip-panel div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ip-panel span {
+  color: var(--text-muted);
+}
+
+.ip-panel a {
+  color: var(--green);
+  text-align: right;
+  overflow-wrap: anywhere;
+  text-shadow: 0 0 10px rgba(0, 255, 123, 0.18);
+}
+
+.ip-panel strong {
+  color: var(--text-muted);
+}
+
 .notes {
   min-height: 42px;
   margin: 0 0 16px;
@@ -372,8 +413,10 @@ select:focus {
   .hero { align-items: flex-start; flex-direction: column; padding: 20px; }
   .hero-actions { align-items: flex-start; }
   .grid { grid-template-columns: 1fr; }
-  .status-lines div { flex-direction: column; gap: 2px; }
-  .status-lines strong { text-align: left; }
+  .status-lines div,
+  .ip-panel div { flex-direction: column; gap: 2px; }
+  .status-lines strong,
+  .ip-panel a { text-align: left; }
 }
 
 .host-stats {

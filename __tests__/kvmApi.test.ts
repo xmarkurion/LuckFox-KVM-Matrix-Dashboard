@@ -1,4 +1,4 @@
-import { fetchHostStats, fetchKvms, runKvmAction, runRawRpc } from '../src/services/kvmApi';
+import { fetchHostStats, fetchKvms, fetchPcStatus, runKvmAction, runRawRpc } from '../src/services/kvmApi';
 
 function mockJsonResponse(body: unknown, init: Partial<Response> = {}): Response {
   return {
@@ -24,6 +24,14 @@ describe('kvmApi service', () => {
     expect(fetch).toHaveBeenCalledWith('/api/kvms');
   });
 
+
+
+  test('fetchPcStatus returns host-agent reachability', async () => {
+    jest.mocked(fetch).mockResolvedValue(mockJsonResponse({ ok: true, pc: { responds: true, latencyMs: 12, checkedAt: 'now', error: '' } }));
+
+    await expect(fetchPcStatus('am4')).resolves.toEqual({ responds: true, latencyMs: 12, checkedAt: 'now', error: '' });
+    expect(fetch).toHaveBeenCalledWith('/api/kvms/am4/pc-status');
+  });
 
   test('fetchHostStats returns host-agent stats', async () => {
     jest.mocked(fetch).mockResolvedValue(mockJsonResponse({ ok: true, stats: { hostname: 'am4-host' } }));

@@ -222,6 +222,19 @@ function hostAgentConfig(kvm: KvmConfigEntry): NormalizedHostAgent | null {
   };
 }
 
+function pcUrlFor(kvm: KvmConfigEntry): string {
+  return hostAgentConfig(kvm)?.url || '';
+}
+
+function pcIpFromUrl(url: string): string {
+  if (!url) return '';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url.replace(/^https?:\/\//, '').replace(/\/$/, '').split(':')[0];
+  }
+}
+
 function publicKvm(kvm: KvmConfigEntry): PublicKvm {
   const agent = hostAgentConfig(kvm);
   const hostScripts = agent?.scripts.map((script) => ({
@@ -234,8 +247,10 @@ function publicKvm(kvm: KvmConfigEntry): PublicKvm {
     id: kvm.id,
     name: kvm.name,
     ip: kvm.ip,
-    notes: kvm.notes || '',
     websiteUrl: baseUrl(kvm),
+    pcUrl: pcUrlFor(kvm),
+    pcIp: pcIpFromUrl(pcUrlFor(kvm)),
+    notes: kvm.notes || '',
     hasWolMac: Boolean(kvm.hostMacAddress),
     hasHostScript: hostScripts.length > 0,
     hostScriptLabel: hostScripts[0]?.label || 'Run Host Script',
@@ -456,6 +471,31 @@ async function runHostScript(kvm: KvmConfigEntry, payload: RequestBody = {}): Pr
   return data;
 }
 
+async function getPcReachability(kvm: KvmConfigEntry): Promise<{ responds: boolean; latencyMs: number | null; checkedAt: string; error: string }> {
+  const checkedAt = new Date().toISOString();
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    return { responds: false, latencyMs: null, checkedAt, error: 'Host agent is not configured' };
+  }
+
+  const started = Date.now();
+  try {
+    const response = await fetchWithTimeout(`${agent.url}/health`, { method: 'GET' }, Math.min(Number(agent.timeoutMs || 60000), 3000));
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      return { responds: false, latencyMs, checkedAt, error: `Host agent health returned HTTP ${response.status}` };
+    }
+    return { responds: true, latencyMs, checkedAt, error: '' };
+  } catch (error) {
+    return {
+      responds: false,
+      latencyMs: Date.now() - started,
+      checkedAt,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 async function getHostStats(kvm: KvmConfigEntry): Promise<HostStats | null> {
   if (!hostAgentConfig(kvm)) return null;
 
@@ -488,6 +528,10 @@ async function getStatus(kvm: KvmConfigEntry): Promise<KvmStatus> {
     ...publicKvm(kvm),
     kvmResponds: false,
     authenticated: false,
+    pcResponds: false,
+    pcLatencyMs: null,
+    pcCheckedAt: new Date().toISOString(),
+    pcError: '',
     deviceId: '',
     video: null,
     usb: undefined,
@@ -500,6 +544,7 @@ async function getStatus(kvm: KvmConfigEntry): Promise<KvmStatus> {
     error: ''
   };
 
+  const pcReachabilityPromise = getPcReachability(kvm);
   const hostStatsPromise = getHostStats(kvm)
     .then((stats) => ({ stats, error: '' }))
     .catch((error: unknown) => ({ stats: null, error: error instanceof Error ? error.message : String(error) }));
@@ -526,6 +571,12 @@ async function getStatus(kvm: KvmConfigEntry): Promise<KvmStatus> {
     status.error = error instanceof Error ? error.message : String(error);
     status.latencyMs = Date.now() - started;
   }
+
+  const pcReachability = await pcReachabilityPromise;
+  status.pcResponds = pcReachability.responds;
+  status.pcLatencyMs = pcReachability.latencyMs;
+  status.pcCheckedAt = pcReachability.checkedAt;
+  status.pcError = pcReachability.error;
 
   const hostStatsResult = await hostStatsPromise;
   status.hostStats = hostStatsResult.stats;
@@ -631,6 +682,11 @@ app.get('/api/kvms/:id/status', asyncHandler(async (req, res) => {
 app.get('/api/kvms/:id/host-stats', asyncHandler(async (req, res) => {
   const kvm = findKvm(routeParam(req.params.id, 'id'));
   res.json({ ok: true, stats: await getHostStats(kvm) });
+}));
+
+app.get('/api/kvms/:id/pc-status', asyncHandler(async (req, res) => {
+  const kvm = findKvm(routeParam(req.params.id, 'id'));
+  res.json({ ok: true, pc: await getPcReachability(kvm) });
 }));
 
 app.post('/api/kvms/:id/login', asyncHandler(async (req, res) => {

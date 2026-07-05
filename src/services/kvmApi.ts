@@ -4,6 +4,7 @@ import type {
   ApiSuccess,
   HostStats,
   KvmStatus,
+  PcReachability,
   KvmsResponse,
   StatusesResponse
 } from '../types/kvm';
@@ -63,6 +64,13 @@ export async function fetchAllStatuses(): Promise<StatusesResponse> {
 export async function fetchKvmStatus(id: string): Promise<KvmStatus> {
   const response = await fetch(`/api/kvms/${encodeURIComponent(id)}/status`);
   return parseJsonResponse<KvmStatus>(response);
+}
+
+
+export async function fetchPcStatus(id: string): Promise<PcReachability> {
+  const response = await fetch(`/api/kvms/${encodeURIComponent(id)}/pc-status`);
+  const data = await parseJsonResponse<{ ok: true; pc: PcReachability }>(response);
+  return data.pc;
 }
 
 export async function fetchHostStats(id: string): Promise<HostStats | null> {

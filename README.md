@@ -1,6 +1,6 @@
 # LuckFox KVM Matrix
 
-A Matrix-themed Vue/TypeScript dashboard for controlling multiple LuckFox PicoKVM devices from one place. It shows one rounded card per KVM, checks KVM/login/video/USB status, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent.
+A Matrix-themed Vue/TypeScript dashboard for controlling multiple LuckFox PicoKVM devices from one place. It shows one rounded card per KVM, shows both the KVM IP and the PC/host-agent URL, tracks separate online status for the KVM and PC every 15 seconds, checks KVM/login/video/USB status, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent.
 
 > **Security note:** This dashboard can send power, keyboard, mouse, virtual media, Wake-on-LAN, and host-side script execution commands. Run it only on a trusted LAN/VPN. Do not expose the dashboard or the host-agent service directly to the public internet.
 
@@ -59,6 +59,8 @@ The host agent provides:
 - `POST /run`
 
 The dashboard uses the same agent to show host stats under each PC card:
+
+The dashboard derives the displayed **PC IP** from `hostAgent.url`. For example, if the agent URL is `http://192.168.10.92:8799`, the card shows **PC IP: `192.168.10.92`** but still links that value to the full agent URL. Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` to show a separate **PC online/offline** badge beside the KVM online badge.
 
 - CPU usage, logical/physical cores, load average, frequency where visible
 - memory and swap usage
@@ -347,7 +349,7 @@ Field reference:
 | `protocol` | Optional, `http` by default. Use `https` only if the KVM supports it. |
 | `hostMacAddress` | Optional MAC address for Wake-on-LAN. |
 | `hostAgent.enabled` | Enables/disables the host-agent integration. |
-| `hostAgent.url` | FastAPI agent URL on the target host. It may be different from the LuckFox KVM IP. |
+| `hostAgent.url` | FastAPI agent URL on the target host. The dashboard displays only the hostname/IP part as **PC IP**. Example: `http://192.168.10.92:8799` displays as `192.168.10.92` and pings `http://192.168.10.92:8799/health` every refresh cycle. It may be different from the LuckFox KVM IP. |
 | `hostAgent.token` | Shared Bearer token sent to the FastAPI agent. |
 | `hostAgent.timeoutMs` | Default timeout for script runs. |
 | `hostAgent.scripts[].id` | Script id. Runs `/scripts/<id>.py` on the agent. |
@@ -378,6 +380,9 @@ This avoids browser CORS problems, keeps KVM passwords out of the frontend bundl
 - Matrix-style dashboard theme.
 - Rounded card layout per KVM.
 - Central JSON configuration.
+- Separate KVM and PC online badges on every card.
+- KVM IP and clickable PC IP on every card. The PC IP is derived from `hostAgent.url` without protocol or port.
+- PC reachability ping through host-agent `/health` every 15 seconds by default.
 - KVM responding/authenticated status.
 - Practical host power indicator based on HDMI/video readiness.
 - Video state, USB state, and keyboard LED state where available.
@@ -459,7 +464,7 @@ luckfox-kvm-matrix/
 
 ### `src/components/KvmCard.vue`
 
-Renders one KVM card. It shows identity, status lines, host stats, main buttons, and the top-right `HostScriptMenu` dropdown.
+Renders one KVM card. It shows KVM IP, clickable PC IP derived from the host-agent URL, separate KVM/PC online badges, status lines, host stats, main buttons, and the top-right `HostScriptMenu` dropdown.
 
 ### `src/components/HostScriptMenu.vue`
 
@@ -491,7 +496,7 @@ Frontend API client for the local Node backend under `/api`.
 
 ### `server/index.ts`
 
-Node/Express backend. It loads config, logs into each KVM, stores session cookies in memory, calls `/api/rpc`, maps dashboard actions to JSON-RPC, calls host-agent `/run` and `/stats`, and serves the built Vue app in production.
+Node/Express backend. It loads config, logs into each KVM, stores session cookies in memory, calls `/api/rpc`, maps dashboard actions to JSON-RPC, calls host-agent `/health`, `/run`, and `/stats`, and serves the built Vue app in production.
 
 ### `host-agent/app/main.py`
 
@@ -585,7 +590,7 @@ List configured KVMs:
 GET /api/kvms
 ```
 
-All statuses, including host stats when configured:
+All statuses, including KVM reachability, PC reachability, and host stats when configured:
 
 ```http
 GET /api/kvms/status
@@ -602,6 +607,13 @@ Host-agent stats only:
 ```http
 GET /api/kvms/:id/host-stats
 ```
+
+PC/host-agent reachability only:
+
+```http
+GET /api/kvms/:id/pc-status
+```
+
 
 Run an action:
 
@@ -658,6 +670,17 @@ POST /auth/login-local
 ```
 
 Use the LuckFox web/local password, not the host-agent token.
+
+
+### PC badge says offline
+
+The PC badge checks the configured `hostAgent.url` by calling `/health` from the Node backend every refresh cycle. Check from the dashboard host:
+
+```bash
+curl http://192.168.10.92:8799/health
+```
+
+If that fails, the PC may be off, the host-agent container may not be running, the port may be blocked by a firewall, or `hostAgent.url` may point to the wrong IP/port.
 
 ### Host-agent returns 401
 

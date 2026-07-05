@@ -61,13 +61,26 @@ export interface HostScriptSummary {
 export interface PublicKvm {
   id: string;
   name: string;
+  /** LuckFox KVM device IP or host from kvm.config.json. */
   ip: string;
-  notes: string;
+  /** Full URL used to open the LuckFox KVM web UI. */
   websiteUrl: string;
+  /** Full URL used to reach the PC host-agent. Empty when no agent is configured. */
+  pcUrl: string;
+  /** Host/IP extracted from pcUrl for display. Empty when no agent is configured. */
+  pcIp: string;
+  notes: string;
   hasWolMac: boolean;
   hasHostScript: boolean;
   hostScriptLabel: string;
   hostScripts: HostScriptSummary[];
+}
+
+export interface PcReachability {
+  responds: boolean;
+  latencyMs: number | null;
+  checkedAt: string;
+  error: string;
 }
 
 export interface VideoState extends JsonRecord {
@@ -145,6 +158,10 @@ export interface HostStats {
 export interface KvmStatus extends PublicKvm {
   kvmResponds: boolean;
   authenticated: boolean;
+  pcResponds: boolean;
+  pcLatencyMs: number | null;
+  pcCheckedAt: string;
+  pcError: string;
   deviceId: string;
   video: VideoState | null;
   usb: JsonValue | undefined;
