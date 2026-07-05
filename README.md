@@ -6,6 +6,8 @@ The app gives you a card for each KVM, shows whether the KVM responds, shows pra
 
 > **Important:** This app is intended for your private LAN or VPN. It stores KVM passwords in a local server-side config file and sends power/keyboard/mouse commands to your machines. Do not expose it directly to the public internet.
 
+![alt text](one.png)
+
 ---
 
 ## Easiest way to run: Docker

@@ -9,7 +9,7 @@
       "id": "lmde",
       "name": "LMDE",
       "ip": "192.168.10.91",
-      "password": "pass",
+      "password": "acca12",
       "notes": "Linux Mint Debian Edition host",
       "hostMacAddress": ""
     },
@@ -17,7 +17,7 @@
       "id": "am4",
       "name": "AM4",
       "ip": "192.168.10.92",
-      "password": "pass",
+      "password": "acca12",
       "notes": "AM4 workstation / test host",
       "hostMacAddress": ""
     },
@@ -25,7 +25,7 @@
       "id": "nas",
       "name": "NAS",
       "ip": "192.168.10.93",
-      "password": "pass",
+      "password": "acca12",
       "notes": "Storage server",
       "hostMacAddress": ""
     },
@@ -33,7 +33,7 @@
       "id": "pcmain",
       "name": "PCMAIN",
       "ip": "192.168.10.94",
-      "password": "pass",
+      "password": "acca12",
       "notes": "Main PC",
       "hostMacAddress": ""
     }
