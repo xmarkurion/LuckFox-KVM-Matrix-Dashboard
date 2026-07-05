@@ -5,7 +5,15 @@
         <p class="eyebrow">{{ kvm.ip }}</p>
         <h2>{{ kvm.name }}</h2>
       </div>
-      <StatusBadge :tone="tone" :label="statusLabel" />
+      <div class="card-header-right">
+        <HostScriptMenu
+          :scripts="kvm.hostScripts || []"
+          :disabled="!kvm.hasHostScript"
+          :busy="busy"
+          @run="runHostScript"
+        />
+        <StatusBadge :tone="tone" :label="statusLabel" />
+      </div>
     </header>
 
     <p class="notes">{{ kvm.notes || 'No notes yet.' }}</p>
@@ -15,7 +23,7 @@
       <div><span>Power LED:</span><strong>{{ status?.hostPower || 'unknown' }}</strong></div>
       <div><span>Video:</span><strong>{{ videoLabel(status?.video) }}</strong></div>
       <div><span>USB:</span><strong>{{ usbLabel(status?.usb) }}</strong></div>
-      <div><span>Host script:</span><strong>{{ kvm.hasHostScript ? 'configured' : 'not configured' }}</strong></div>
+      <div><span>Host scripts:</span><strong>{{ scriptCountLabel }}</strong></div>
       <div><span>Latency:</span><strong>{{ status?.latencyMs ?? '—' }} ms</strong></div>
       <div><span>Checked:</span><strong>{{ timeAgo(status?.checkedAt) }}</strong></div>
     </div>
@@ -29,13 +37,6 @@
       <ActionButton label="Refresh" :busy="busy === 'refresh'" @click="$emit('refresh')" />
       <ActionButton label="Power" kind="primary" :busy="busy === 'power'" @click="emitAction('power')" />
       <ActionButton label="Arrow Up" kind="primary" :busy="busy === 'arrowUp'" @click="emitAction('arrowUp')" />
-      <ActionButton
-        :label="kvm.hostScriptLabel || 'Run Script'"
-        kind="primary"
-        :disabled="!kvm.hasHostScript"
-        :busy="busy === 'hostScript'"
-        @click="emitAction('hostScript')"
-      />
     </div>
 
     <details class="details-block">
@@ -46,12 +47,6 @@
           <ActionButton label="Reset" kind="danger" :busy="busy === 'reset'" @click="emitAction('reset')" />
           <ActionButton label="USB Wakeup" :busy="busy === 'usbWakeup'" @click="emitAction('usbWakeup')" />
           <ActionButton label="Wake-on-LAN" :disabled="!kvm.hasWolMac" :busy="busy === 'wol'" @click="emitAction('wol')" />
-          <ActionButton
-            :label="kvm.hostScriptLabel || 'Run Host Script'"
-            :disabled="!kvm.hasHostScript"
-            :busy="busy === 'hostScript'"
-            @click="emitAction('hostScript')"
-          />
         </div>
       </section>
 
@@ -66,6 +61,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import ActionButton from './ActionButton.vue';
+import HostScriptMenu from './HostScriptMenu.vue';
 import HostStatsPanel from './HostStatsPanel.vue';
 import KeyboardPanel from './KeyboardPanel.vue';
 import MousePanel from './MousePanel.vue';
@@ -73,7 +69,7 @@ import RawRpcPanel from './RawRpcPanel.vue';
 import StatusBadge from './StatusBadge.vue';
 import VirtualMediaPanel from './VirtualMediaPanel.vue';
 import { statusTone, timeAgo, usbLabel, videoLabel } from '../services/formatters';
-import type { ActionPayload, KvmActionEvent, KvmStatus, KvmSummary, PanelActionEvent } from '../types/kvm';
+import type { ActionPayload, HostScriptSummary, KvmActionEvent, KvmStatus, KvmSummary, PanelActionEvent } from '../types/kvm';
 
 const props = withDefaults(
   defineProps<{
@@ -99,8 +95,21 @@ const statusLabel = computed(() => {
   return props.status.kvmResponds ? 'online' : 'login only';
 });
 
+const scriptCountLabel = computed(() => {
+  const count = props.kvm.hostScripts?.length || 0;
+  if (!count) return 'not configured';
+  return count === 1 ? '1 script' : `${count} scripts`;
+});
+
 function emitAction(action: string, payload: ActionPayload = {}): void {
   emit('action', { id: props.kvm.id, action, payload });
+}
+
+function runHostScript(script: HostScriptSummary): void {
+  emitAction('hostScript', {
+    scriptId: script.id,
+    scriptLabel: script.label
+  });
 }
 
 function forwardAction(event: PanelActionEvent): void {

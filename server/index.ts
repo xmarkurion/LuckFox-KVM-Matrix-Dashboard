@@ -8,6 +8,8 @@ import type {
   JsonRpcEnvelope,
   JsonRpcRequestPayload,
   JsonValue,
+  HostAgentConfig,
+  HostScriptEntry,
   HostStats,
   KvmConfigEntry,
   KvmStatus,
@@ -109,7 +111,7 @@ const ACTIONS: ServerAction[] = [
   { id: 'usbWakeup', label: 'USB wakeup', rpc: 'sendUsbWakeupSignal' },
   { id: 'wol', label: 'Wake-on-LAN', rpc: 'sendWOLMagicPacket', params: ['macAddress'] },
   { id: 'arrowUp', label: 'Arrow Up', rpc: 'keyboardReport' },
-  { id: 'hostScript', label: 'Run host script', rpc: 'hostScript' },
+  { id: 'hostScript', label: 'Run configured host script', rpc: 'hostScript', params: ['scriptId'] },
   { id: 'ctrlAltDel', label: 'Ctrl+Alt+Del', rpc: 'keyboardReport' },
   { id: 'keyPress', label: 'Key press', rpc: 'keyboardReport', params: ['key'] },
   { id: 'keyCombo', label: 'Key combo', rpc: 'keyboardReport', params: ['combo'] },
@@ -150,7 +152,84 @@ function baseUrl(kvm: KvmConfigEntry): string {
   return `${kvm.protocol || 'http'}://${ip}`;
 }
 
+const DEFAULT_HOST_SCRIPT_ID = 'host_action';
+
+type NormalizedHostScript = HostScriptEntry & { id: string; label: string; description: string };
+
+interface NormalizedHostAgent {
+  enabled: boolean;
+  url: string;
+  token?: string;
+  timeoutMs?: number;
+  scripts: NormalizedHostScript[];
+}
+
+function normalizeScriptId(value: unknown): string {
+  return String(value || '').trim();
+}
+
+function normalizeHostScript(script: HostScriptEntry, fallbackLabel: string): NormalizedHostScript | null {
+  const id = normalizeScriptId(script.id);
+  if (!id || script.enabled === false) return null;
+
+  return {
+    id,
+    label: String(script.label || fallbackLabel || id),
+    description: String(script.description || ''),
+    timeoutMs: script.timeoutMs,
+    enabled: script.enabled
+  };
+}
+
+function hostAgentConfig(kvm: KvmConfigEntry): NormalizedHostAgent | null {
+  const legacy = kvm.hostScript;
+  const source: HostAgentConfig | undefined = kvm.hostAgent || (legacy
+    ? {
+        enabled: legacy.enabled,
+        url: legacy.url,
+        token: legacy.token,
+        timeoutMs: legacy.timeoutMs,
+        scripts: [{
+          id: DEFAULT_HOST_SCRIPT_ID,
+          label: legacy.label || 'Run Host Script',
+          description: 'Legacy single-script host action.'
+        }]
+      }
+    : undefined);
+
+  const url = source?.url?.trim().replace(/\/$/, '');
+  if (!source || !url || source.enabled === false) return null;
+
+  const configuredScripts = Array.isArray(source.scripts) ? source.scripts : [];
+  let scripts = configuredScripts
+    .map((script) => normalizeHostScript(script, 'Run Host Script'))
+    .filter((script): script is NormalizedHostScript => Boolean(script));
+
+  if (!scripts.length) {
+    scripts = [{
+      id: DEFAULT_HOST_SCRIPT_ID,
+      label: legacy?.label || 'Run Host Script',
+      description: 'Default editable host action.'
+    }];
+  }
+
+  return {
+    enabled: true,
+    url,
+    token: source.token,
+    timeoutMs: source.timeoutMs,
+    scripts
+  };
+}
+
 function publicKvm(kvm: KvmConfigEntry): PublicKvm {
+  const agent = hostAgentConfig(kvm);
+  const hostScripts = agent?.scripts.map((script) => ({
+    id: script.id,
+    label: script.label,
+    description: script.description || ''
+  })) || [];
+
   return {
     id: kvm.id,
     name: kvm.name,
@@ -158,8 +237,9 @@ function publicKvm(kvm: KvmConfigEntry): PublicKvm {
     notes: kvm.notes || '',
     websiteUrl: baseUrl(kvm),
     hasWolMac: Boolean(kvm.hostMacAddress),
-    hasHostScript: Boolean(kvm.hostScript?.url && kvm.hostScript?.enabled !== false),
-    hostScriptLabel: kvm.hostScript?.label || 'Run Host Script'
+    hasHostScript: hostScripts.length > 0,
+    hostScriptLabel: hostScripts[0]?.label || 'Run Host Script',
+    hostScripts
   };
 }
 
@@ -297,32 +377,56 @@ async function typeText(kvm: KvmConfigEntry, text: unknown, delayMs = 5): Promis
   return { typed: normalizedText.length };
 }
 
-function hostScriptUrl(kvm: KvmConfigEntry): string {
-  const url = kvm.hostScript?.url?.trim().replace(/\/$/, '');
-  if (!url || kvm.hostScript?.enabled === false) {
+function hostAgentUrl(kvm: KvmConfigEntry): string {
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
     throw httpError(`Host script agent is not configured for ${kvm.name}`, 400);
   }
-  return url;
+  return agent.url;
 }
 
 function hostAgentHeaders(kvm: KvmConfigEntry, json = false): Record<string, string> {
+  const agent = hostAgentConfig(kvm);
   const headers: Record<string, string> = json ? { 'Content-Type': 'application/json' } : {};
-  if (kvm.hostScript?.token) {
-    headers.Authorization = `Bearer ${kvm.hostScript.token}`;
-    headers['X-Agent-Token'] = kvm.hostScript.token;
+  if (agent?.token) {
+    headers.Authorization = `Bearer ${agent.token}`;
+    headers['X-Agent-Token'] = agent.token;
   }
   return headers;
 }
 
-async function runHostScript(kvm: KvmConfigEntry, payload: RequestBody = {}): Promise<JsonValue | null> {
-  const timeoutMs = Number(kvm.hostScript?.timeoutMs || 60000);
+function findConfiguredHostScript(kvm: KvmConfigEntry, requestedScriptId?: unknown): NormalizedHostScript {
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    throw httpError(`Host script agent is not configured for ${kvm.name}`, 400);
+  }
 
-  const response = await fetchWithTimeout(`${hostScriptUrl(kvm)}/run`, {
+  const scriptId = normalizeScriptId(requestedScriptId) || agent.scripts[0]?.id || DEFAULT_HOST_SCRIPT_ID;
+  const script = agent.scripts.find((entry) => entry.id === scriptId);
+  if (!script) {
+    throw httpError(`Host script is not configured for ${kvm.name}: ${scriptId}`, 404);
+  }
+  return script;
+}
+
+async function runHostScript(kvm: KvmConfigEntry, payload: RequestBody = {}): Promise<JsonValue | null> {
+  const agent = hostAgentConfig(kvm);
+  if (!agent) {
+    throw httpError(`Host script agent is not configured for ${kvm.name}`, 400);
+  }
+
+  const script = findConfiguredHostScript(kvm, payload.scriptId);
+  const timeoutMs = Number(script.timeoutMs || agent.timeoutMs || 60000);
+
+  const response = await fetchWithTimeout(`${hostAgentUrl(kvm)}/run`, {
     method: 'POST',
     headers: hostAgentHeaders(kvm, true),
     body: JSON.stringify({
+      scriptId: script.id,
+      scriptLabel: script.label,
       kvm: publicKvm(kvm),
-      payload
+      payload,
+      timeoutSeconds: Math.ceil(timeoutMs / 1000)
     })
   }, timeoutMs + 2000);
 
@@ -346,19 +450,19 @@ async function runHostScript(kvm: KvmConfigEntry, payload: RequestBody = {}): Pr
   if (isJsonRecord(data) && data.ok === false) {
     const stderr = typeof data.stderr === 'string' ? data.stderr.trim() : '';
     const exitCode = typeof data.exitCode === 'number' ? data.exitCode : 'unknown';
-    throw httpError(`Host script exited with code ${exitCode}${stderr ? `: ${stderr.slice(0, 200)}` : ''}`, 502, data);
+    throw httpError(`Host script ${script.label} exited with code ${exitCode}${stderr ? `: ${stderr.slice(0, 200)}` : ''}`, 502, data);
   }
 
   return data;
 }
 
 async function getHostStats(kvm: KvmConfigEntry): Promise<HostStats | null> {
-  if (!kvm.hostScript?.url || kvm.hostScript?.enabled === false) return null;
+  if (!hostAgentConfig(kvm)) return null;
 
-  const response = await fetchWithTimeout(`${hostScriptUrl(kvm)}/stats`, {
+  const response = await fetchWithTimeout(`${hostAgentUrl(kvm)}/stats`, {
     method: 'GET',
     headers: hostAgentHeaders(kvm)
-  }, Math.min(Number(kvm.hostScript?.timeoutMs || 60000), 10000));
+  }, Math.min(Number(hostAgentConfig(kvm)?.timeoutMs || 60000), 10000));
 
   const text = await response.text().catch(() => '');
   let data: HostStats | null = null;

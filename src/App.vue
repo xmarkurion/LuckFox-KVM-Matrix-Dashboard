@@ -102,8 +102,22 @@ async function refreshOne(id: string): Promise<void> {
   }
 }
 
+function busyKeyFor(action: string, payload: ActionPayload): string {
+  if (action === 'hostScript' && typeof payload.scriptId === 'string') {
+    return `hostScript:${payload.scriptId}`;
+  }
+  return action;
+}
+
+function actionToastLabel(action: string, payload: ActionPayload): string {
+  if (action === 'hostScript' && typeof payload.scriptLabel === 'string') {
+    return payload.scriptLabel;
+  }
+  return action;
+}
+
 async function handleAction({ id, action, payload }: KvmActionEvent): Promise<void> {
-  busyMap[id] = action;
+  busyMap[id] = busyKeyFor(action, payload);
   try {
     if (action === 'rawRpc') {
       const method = typeof payload.method === 'string' ? payload.method : '';
@@ -111,7 +125,8 @@ async function handleAction({ id, action, payload }: KvmActionEvent): Promise<vo
     } else {
       await runKvmAction(id, action, payload);
     }
-    addToast(`${id}: ${action} sent`, action.includes('reset') || action.includes('reboot') ? 'warn' : 'good');
+    const toastLabel = actionToastLabel(action, payload);
+    addToast(`${id}: ${toastLabel} sent`, action.includes('reset') || action.includes('reboot') ? 'warn' : 'good');
     await refreshOne(id);
   } catch (err) {
     addToast(`${id}: ${errorMessage(err)}`, 'bad');

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -15,20 +16,23 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 APP_NAME = "luckfox-host-script-agent"
-SCRIPT_PATH = Path(os.getenv("SCRIPT_PATH", "/scripts/host_action.py"))
+LEGACY_SCRIPT_PATH = Path(os.getenv("SCRIPT_PATH", "/scripts/host_action.py"))
+SCRIPTS_DIR = Path(os.getenv("SCRIPTS_DIR", str(LEGACY_SCRIPT_PATH.parent)))
+DEFAULT_SCRIPT_ID = os.getenv("DEFAULT_SCRIPT_ID", LEGACY_SCRIPT_PATH.stem or "host_action")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("SCRIPT_TIMEOUT_SECONDS", "60"))
 AGENT_TOKEN = os.getenv("AGENT_TOKEN", "change-me-agent-token")
-SCRIPT_CWD = os.getenv("SCRIPT_CWD", str(SCRIPT_PATH.parent))
+SCRIPT_CWD = os.getenv("SCRIPT_CWD", str(SCRIPTS_DIR))
 HOST_PROC_PATH = os.getenv("HOST_PROC_PATH", "/host/proc")
 HOST_ROOT_PATH = Path(os.getenv("HOST_ROOT_PATH", "/host/root"))
 MAX_PROCESSES = int(os.getenv("STATS_MAX_PROCESSES", "8"))
+SCRIPT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # When /proc from the host is mounted into the container, psutil can use it.
 # Without the mount, these calls still work, but they describe the container / Docker VM view.
 if Path(HOST_PROC_PATH).exists():
     psutil.PROCFS_PATH = HOST_PROC_PATH
 
-app = FastAPI(title="LuckFox Host Script Agent", version="1.1.0")
+app = FastAPI(title="LuckFox Host Script Agent", version="1.2.0")
 
 
 class KvmContext(BaseModel):
@@ -42,16 +46,55 @@ class KvmContext(BaseModel):
 class RunRequest(BaseModel):
     kvm: KvmContext = Field(default_factory=KvmContext)
     payload: dict[str, Any] = Field(default_factory=dict)
+    scriptId: str = DEFAULT_SCRIPT_ID
+    scriptLabel: str = ""
     timeoutSeconds: float | None = None
 
 
 class RunResponse(BaseModel):
     ok: bool
+    scriptId: str
+    scriptLabel: str
     script: str
     exitCode: int
     durationMs: int
     stdout: str
     stderr: str
+
+
+def safe_script_id(script_id: str | None) -> str:
+    resolved = (script_id or DEFAULT_SCRIPT_ID).strip()
+    if not resolved:
+        resolved = DEFAULT_SCRIPT_ID
+    if not SCRIPT_ID_PATTERN.fullmatch(resolved):
+        raise HTTPException(status_code=400, detail="scriptId may contain only letters, numbers, underscore, and dash")
+    return resolved
+
+
+def script_path_for(script_id: str | None) -> Path:
+    resolved_id = safe_script_id(script_id)
+    script_path = (SCRIPTS_DIR / f"{resolved_id}.py").resolve()
+    scripts_root = SCRIPTS_DIR.resolve()
+    try:
+        script_path.relative_to(scripts_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Resolved script path escaped SCRIPTS_DIR")
+    return script_path
+
+
+def available_scripts() -> list[dict[str, str]]:
+    if not SCRIPTS_DIR.exists():
+        return []
+    scripts: list[dict[str, str]] = []
+    for path in sorted(SCRIPTS_DIR.glob("*.py")):
+        if path.name.startswith("."):
+            continue
+        scripts.append({
+            "id": path.stem,
+            "filename": path.name,
+            "path": str(path),
+        })
+    return scripts
 
 
 def verify_token(
@@ -333,12 +376,25 @@ def collect_stats() -> dict[str, Any]:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    default_script_path = script_path_for(DEFAULT_SCRIPT_ID)
     return {
         "ok": True,
         "service": APP_NAME,
-        "scriptPath": str(SCRIPT_PATH),
-        "scriptExists": SCRIPT_PATH.exists(),
+        "scriptsDir": str(SCRIPTS_DIR),
+        "defaultScriptId": DEFAULT_SCRIPT_ID,
+        "defaultScriptPath": str(default_script_path),
+        "defaultScriptExists": default_script_path.exists(),
+        "availableScripts": available_scripts(),
         "statsEnabled": True,
+    }
+
+
+@app.get("/scripts", dependencies=[Depends(verify_token)])
+def scripts() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "defaultScriptId": DEFAULT_SCRIPT_ID,
+        "scripts": available_scripts(),
     }
 
 
@@ -349,10 +405,12 @@ def stats() -> dict[str, Any]:
 
 @app.post("/run", response_model=RunResponse, dependencies=[Depends(verify_token)])
 def run_script(request: RunRequest) -> RunResponse:
-    if not SCRIPT_PATH.exists():
-        raise HTTPException(status_code=500, detail=f"Script not found: {SCRIPT_PATH}")
-    if not SCRIPT_PATH.is_file():
-        raise HTTPException(status_code=500, detail=f"Script path is not a file: {SCRIPT_PATH}")
+    script_id = safe_script_id(request.scriptId)
+    script_path = script_path_for(script_id)
+    if not script_path.exists():
+        raise HTTPException(status_code=500, detail=f"Script not found: {script_path}")
+    if not script_path.is_file():
+        raise HTTPException(status_code=500, detail=f"Script path is not a file: {script_path}")
 
     timeout = request.timeoutSeconds or DEFAULT_TIMEOUT_SECONDS
     if timeout <= 0 or timeout > 3600:
@@ -361,6 +419,9 @@ def run_script(request: RunRequest) -> RunResponse:
     env = os.environ.copy()
     env.update(
         {
+            "HOST_SCRIPT_ID": script_id,
+            "HOST_SCRIPT_LABEL": request.scriptLabel,
+            "HOST_SCRIPT_PATH": str(script_path),
             "KVM_ID": request.kvm.id,
             "KVM_NAME": request.kvm.name,
             "KVM_IP": request.kvm.ip,
@@ -370,13 +431,19 @@ def run_script(request: RunRequest) -> RunResponse:
         }
     )
 
+    input_payload = {
+        "script": {"id": script_id, "label": request.scriptLabel, "path": str(script_path)},
+        "kvm": request.kvm.model_dump(),
+        "payload": request.payload,
+    }
+
     started = time.perf_counter()
     try:
         completed = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH)],
-            cwd=SCRIPT_CWD if Path(SCRIPT_CWD).exists() else None,
+            [sys.executable, str(script_path)],
+            cwd=SCRIPT_CWD if Path(SCRIPT_CWD).exists() else str(script_path.parent),
             env=env,
-            input=json.dumps({"kvm": request.kvm.model_dump(), "payload": request.payload}),
+            input=json.dumps(input_payload),
             text=True,
             capture_output=True,
             timeout=timeout,
@@ -386,7 +453,9 @@ def run_script(request: RunRequest) -> RunResponse:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return RunResponse(
             ok=False,
-            script=str(SCRIPT_PATH),
+            scriptId=script_id,
+            scriptLabel=request.scriptLabel,
+            script=str(script_path),
             exitCode=124,
             durationMs=duration_ms,
             stdout=exc.stdout or "",
@@ -396,7 +465,9 @@ def run_script(request: RunRequest) -> RunResponse:
     duration_ms = int((time.perf_counter() - started) * 1000)
     return RunResponse(
         ok=completed.returncode == 0,
-        script=str(SCRIPT_PATH),
+        scriptId=script_id,
+        scriptLabel=request.scriptLabel,
+        script=str(script_path),
         exitCode=completed.returncode,
         durationMs=duration_ms,
         stdout=completed.stdout,

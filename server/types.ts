@@ -10,7 +10,24 @@ export interface ServerConfig {
   pollIntervalMs?: number;
 }
 
-export interface HostScriptConfig {
+export interface HostScriptEntry {
+  id: string;
+  label: string;
+  description?: string;
+  timeoutMs?: number;
+  enabled?: boolean;
+}
+
+export interface HostAgentConfig {
+  enabled?: boolean;
+  url: string;
+  token?: string;
+  timeoutMs?: number;
+  scripts?: HostScriptEntry[];
+}
+
+/** Legacy single-script config kept so older kvm.config.json files still work. */
+export interface LegacyHostScriptConfig {
   enabled?: boolean;
   url: string;
   token?: string;
@@ -26,12 +43,19 @@ export interface KvmConfigEntry {
   notes?: string;
   protocol?: 'http' | 'https';
   hostMacAddress?: string;
-  hostScript?: HostScriptConfig;
+  hostAgent?: HostAgentConfig;
+  hostScript?: LegacyHostScriptConfig;
 }
 
 export interface AppConfig {
   server?: ServerConfig;
   kvms: KvmConfigEntry[];
+}
+
+export interface HostScriptSummary {
+  id: string;
+  label: string;
+  description: string;
 }
 
 export interface PublicKvm {
@@ -43,6 +67,7 @@ export interface PublicKvm {
   hasWolMac: boolean;
   hasHostScript: boolean;
   hostScriptLabel: string;
+  hostScripts: HostScriptSummary[];
 }
 
 export interface VideoState extends JsonRecord {

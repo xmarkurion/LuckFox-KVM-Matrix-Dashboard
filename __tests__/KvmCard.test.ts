@@ -10,7 +10,11 @@ const kvm: KvmSummary = {
   websiteUrl: 'http://192.168.10.92',
   hasWolMac: false,
   hasHostScript: true,
-  hostScriptLabel: 'Run AM4 Script'
+  hostScriptLabel: 'Run AM4 Script',
+  hostScripts: [
+    { id: 'host_action', label: 'Run AM4 Script', description: 'Default editable host action script.' },
+    { id: 'script2', label: 'AM4 Example Script 2', description: 'Example second script.' }
+  ]
 };
 
 const status: KvmStatus = {
@@ -51,6 +55,8 @@ describe('KvmCard', () => {
     expect(wrapper.text()).toContain('am4-host');
     expect(wrapper.text()).toContain('CPU');
     expect(wrapper.text()).toContain('12.5%');
+    expect(wrapper.text()).toContain('Scripts');
+    expect(wrapper.text()).toContain('AM4 Example Script 2');
   });
 
   test('emits power action', async () => {
@@ -62,12 +68,16 @@ describe('KvmCard', () => {
     expect(wrapper.emitted('action')?.[0][0]).toEqual({ id: 'am4', action: 'power', payload: {} });
   });
 
-  test('emits host script action', async () => {
+  test('emits selected host script action', async () => {
     const wrapper = mount(KvmCard, { props: { kvm, status, busy: '' } });
-    const scriptButton = wrapper.findAll('button').find((button) => button.text().includes('Run AM4 Script'));
+    const scriptButton = wrapper.findAll('button').find((button) => button.text().includes('AM4 Example Script 2'));
 
     await scriptButton?.trigger('click');
 
-    expect(wrapper.emitted('action')?.[0][0]).toEqual({ id: 'am4', action: 'hostScript', payload: {} });
+    expect(wrapper.emitted('action')?.[0][0]).toEqual({
+      id: 'am4',
+      action: 'hostScript',
+      payload: { scriptId: 'script2', scriptLabel: 'AM4 Example Script 2' }
+    });
   });
 });

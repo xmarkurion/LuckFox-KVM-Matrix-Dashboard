@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     AGENT_HOST=0.0.0.0 \
     AGENT_PORT=8799 \
-    SCRIPT_PATH=/scripts/host_action.py \
+    SCRIPTS_DIR=/scripts \
+    DEFAULT_SCRIPT_ID=host_action \
     SCRIPT_TIMEOUT_SECONDS=60
 
 WORKDIR /app
@@ -14,8 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY scripts ./scripts-default
-RUN mkdir -p /scripts && \
-    if [ ! -f /scripts/host_action.py ]; then cp /app/scripts-default/host_action.py /scripts/host_action.py; fi
+RUN mkdir -p /scripts && cp -n /app/scripts-default/*.py /scripts/ 2>/dev/null || true
 
 EXPOSE 8799
 

@@ -4,6 +4,12 @@ export interface JsonObject {
   [key: string]: JsonValue | undefined;
 }
 
+export interface HostScriptSummary {
+  id: string;
+  label: string;
+  description: string;
+}
+
 export interface KvmSummary {
   id: string;
   name: string;
@@ -13,6 +19,7 @@ export interface KvmSummary {
   hasWolMac: boolean;
   hasHostScript: boolean;
   hostScriptLabel: string;
+  hostScripts: HostScriptSummary[];
 }
 
 export interface VideoState extends JsonObject {
