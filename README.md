@@ -944,13 +944,6 @@ volumes:
 ---
 
 ## License
-
-Add your preferred license before publishing.
-
-Common options:
-
-- MIT
-- Apache-2.0
 - GPL-3.0
 
 ---
