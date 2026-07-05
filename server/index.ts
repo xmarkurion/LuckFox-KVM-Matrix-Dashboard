@@ -12,6 +12,7 @@ import type {
   HostScriptEntry,
   HostStats,
   KvmConfigEntry,
+  KvmEndpointConfig,
   KvmStatus,
   PublicKvm,
   RequestBody,
@@ -147,9 +148,43 @@ function findKvm(id: string): KvmConfigEntry {
   return kvm;
 }
 
+interface ResolvedKvmEndpoint {
+  enabled: boolean;
+  ip: string;
+  password: string;
+  protocol: 'http' | 'https';
+  hostMacAddress: string;
+}
+
+function resolvedKvmEndpoint(entry: KvmConfigEntry): ResolvedKvmEndpoint {
+  const nested: KvmEndpointConfig = entry.kvm && typeof entry.kvm === 'object' ? entry.kvm : {};
+  const ip = String(nested.ip ?? entry.ip ?? '').trim();
+  const password = String(nested.password ?? entry.password ?? '').trim();
+  const protocol = nested.protocol || entry.protocol || 'http';
+  const hostMacAddress = String(nested.hostMacAddress ?? entry.hostMacAddress ?? '').trim();
+  const explicitlyDisabled = entry.kvm === false || nested.enabled === false || entry.kvmEnabled === false;
+
+  return {
+    enabled: !explicitlyDisabled && Boolean(ip && password),
+    ip,
+    password,
+    protocol,
+    hostMacAddress
+  };
+}
+
+function ensureKvmEnabled(entry: KvmConfigEntry): ResolvedKvmEndpoint {
+  const endpoint = resolvedKvmEndpoint(entry);
+  if (!endpoint.enabled) {
+    throw httpError(`LuckFox KVM is not configured/enabled for ${entry.name}`, 400);
+  }
+  return endpoint;
+}
+
 function baseUrl(kvm: KvmConfigEntry): string {
-  const ip = kvm.ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  return `${kvm.protocol || 'http'}://${ip}`;
+  const endpoint = ensureKvmEnabled(kvm);
+  const ip = endpoint.ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return `${endpoint.protocol}://${ip}`;
 }
 
 const DEFAULT_HOST_SCRIPT_ID = 'host_action';
@@ -237,6 +272,7 @@ function pcIpFromUrl(url: string): string {
 
 function publicKvm(kvm: KvmConfigEntry): PublicKvm {
   const agent = hostAgentConfig(kvm);
+  const endpoint = resolvedKvmEndpoint(kvm);
   const hostScripts = agent?.scripts.map((script) => ({
     id: script.id,
     label: script.label,
@@ -246,12 +282,13 @@ function publicKvm(kvm: KvmConfigEntry): PublicKvm {
   return {
     id: kvm.id,
     name: kvm.name,
-    ip: kvm.ip,
-    websiteUrl: baseUrl(kvm),
+    kvmEnabled: endpoint.enabled,
+    ip: endpoint.enabled ? endpoint.ip : '',
+    websiteUrl: endpoint.enabled ? baseUrl(kvm) : '',
     pcUrl: pcUrlFor(kvm),
     pcIp: pcIpFromUrl(pcUrlFor(kvm)),
     notes: kvm.notes || '',
-    hasWolMac: Boolean(kvm.hostMacAddress),
+    hasWolMac: endpoint.enabled && Boolean(endpoint.hostMacAddress),
     hasHostScript: hostScripts.length > 0,
     hostScriptLabel: hostScripts[0]?.label || 'Run Host Script',
     hostScripts
@@ -314,7 +351,7 @@ async function login(kvm: KvmConfigEntry): Promise<JsonValue> {
   const response = await fetchWithTimeout(`${baseUrl(kvm)}/auth/login-local`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: kvm.password })
+    body: JSON.stringify({ password: ensureKvmEnabled(kvm).password })
   });
   if (response.status === 401) throw httpError('Login rejected by KVM', 401);
   if (!response.ok) throw httpError(`Login failed with HTTP ${response.status}`, response.status);
@@ -549,27 +586,32 @@ async function getStatus(kvm: KvmConfigEntry): Promise<KvmStatus> {
     .then((stats) => ({ stats, error: '' }))
     .catch((error: unknown) => ({ stats: null, error: error instanceof Error ? error.message : String(error) }));
 
-  try {
-    await login(kvm);
-    status.authenticated = true;
-    const [ping, deviceId, video, usb, keyboardLeds] = await Promise.allSettled([
-      rpc<string>(kvm, 'ping'),
-      rpc<string>(kvm, 'getDeviceID'),
-      rpc<VideoState>(kvm, 'getVideoState'),
-      rpc<JsonValue>(kvm, 'getUSBState'),
-      rpc<JsonValue>(kvm, 'getKeyboardLedState')
-    ]);
+  if (resolvedKvmEndpoint(kvm).enabled) {
+    try {
+      await login(kvm);
+      status.authenticated = true;
+      const [ping, deviceId, video, usb, keyboardLeds] = await Promise.allSettled([
+        rpc<string>(kvm, 'ping'),
+        rpc<string>(kvm, 'getDeviceID'),
+        rpc<VideoState>(kvm, 'getVideoState'),
+        rpc<JsonValue>(kvm, 'getUSBState'),
+        rpc<JsonValue>(kvm, 'getKeyboardLedState')
+      ]);
 
-    status.kvmResponds = ping.status === 'fulfilled' && ping.value === 'pong';
-    status.deviceId = deviceId.status === 'fulfilled' && typeof deviceId.value === 'string' ? deviceId.value : '';
-    status.video = video.status === 'fulfilled' ? video.value : null;
-    status.usb = usb.status === 'fulfilled' ? usb.value ?? undefined : undefined;
-    status.keyboardLeds = keyboardLeds.status === 'fulfilled' ? keyboardLeds.value ?? undefined : undefined;
-    status.hostPower = status.video?.ready ? 'on / HDMI signal' : `unknown${status.video?.error ? ` (${status.video.error})` : ''}`;
-    status.latencyMs = Date.now() - started;
-  } catch (error) {
-    status.error = error instanceof Error ? error.message : String(error);
-    status.latencyMs = Date.now() - started;
+      status.kvmResponds = ping.status === 'fulfilled' && ping.value === 'pong';
+      status.deviceId = deviceId.status === 'fulfilled' && typeof deviceId.value === 'string' ? deviceId.value : '';
+      status.video = video.status === 'fulfilled' ? video.value : null;
+      status.usb = usb.status === 'fulfilled' ? usb.value ?? undefined : undefined;
+      status.keyboardLeds = keyboardLeds.status === 'fulfilled' ? keyboardLeds.value ?? undefined : undefined;
+      status.hostPower = status.video?.ready ? 'on / HDMI signal' : `unknown${status.video?.error ? ` (${status.video.error})` : ''}`;
+      status.latencyMs = Date.now() - started;
+    } catch (error) {
+      status.error = error instanceof Error ? error.message : String(error);
+      status.latencyMs = Date.now() - started;
+    }
+  } else {
+    status.hostPower = 'no KVM configured';
+    status.latencyMs = null;
   }
 
   const pcReachability = await pcReachabilityPromise;
@@ -594,7 +636,7 @@ async function runAction(kvm: KvmConfigEntry, action: string, body: RequestBody 
     case 'usbWakeup':
       return rpc(kvm, 'sendUsbWakeupSignal');
     case 'wol': {
-      const macAddress = String(body.macAddress || kvm.hostMacAddress || '');
+      const macAddress = String(body.macAddress || ensureKvmEnabled(kvm).hostMacAddress || '');
       if (!macAddress) throw httpError('macAddress is required for Wake-on-LAN', 400);
       return rpc(kvm, 'sendWOLMagicPacket', { macAddress });
     }

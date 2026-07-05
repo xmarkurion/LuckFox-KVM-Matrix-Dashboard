@@ -5,6 +5,7 @@ import type { KvmStatus, KvmSummary } from '../src/types/kvm';
 const kvm: KvmSummary = {
   id: 'am4',
   name: 'AM4',
+  kvmEnabled: true,
   ip: '192.168.10.92',
   notes: 'AM4 workstation',
   websiteUrl: 'http://192.168.10.92',
@@ -68,6 +69,44 @@ describe('KvmCard', () => {
     expect(wrapper.text()).toContain('12.5%');
     expect(wrapper.text()).toContain('Scripts');
     expect(wrapper.text()).toContain('AM4 Example Script 2');
+  });
+
+
+
+  test('renders host-agent-only devices without KVM controls', () => {
+    const agentOnlyKvm: KvmSummary = {
+      ...kvm,
+      id: 'scriptbox',
+      name: 'ScriptBox',
+      kvmEnabled: false,
+      ip: '',
+      websiteUrl: '',
+      pcUrl: 'http://192.168.10.150:8799',
+      pcIp: '192.168.10.150'
+    };
+    const agentOnlyStatus: KvmStatus = {
+      ...status,
+      ...agentOnlyKvm,
+      kvmResponds: false,
+      authenticated: false,
+      hostPower: 'no KVM configured',
+      video: null,
+      usb: undefined,
+      latencyMs: null
+    };
+
+    const wrapper = mount(KvmCard, { props: { kvm: agentOnlyKvm, status: agentOnlyStatus, busy: '' } });
+
+    expect(wrapper.text()).toContain('ScriptBox');
+    expect(wrapper.text()).toContain('Host-agent only');
+    expect(wrapper.text()).toContain('PC IP:');
+    expect(wrapper.text()).toContain('192.168.10.150');
+    expect(wrapper.text()).toContain('PC online');
+    expect(wrapper.text()).toContain('AM4 Example Script 2');
+    expect(wrapper.text()).not.toContain('KVM IP:');
+    expect(wrapper.text()).not.toContain('Open KVM');
+    expect(wrapper.text()).not.toContain('Power LED:');
+    expect(wrapper.text()).not.toContain('More API controls');
   });
 
   test('emits power action', async () => {

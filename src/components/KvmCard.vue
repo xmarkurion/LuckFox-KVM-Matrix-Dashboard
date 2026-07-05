@@ -1,5 +1,5 @@
 <template>
-  <article class="kvm-card panel glow">
+  <article class="kvm-card panel glow" :class="{ 'agent-only-card': !kvm.kvmEnabled }">
     <header class="card-header">
       <div>
         <p class="eyebrow">{{ kvm.id }}</p>
@@ -13,14 +13,14 @@
           @run="runHostScript"
         />
         <div class="online-badges" aria-label="Online status">
-          <StatusBadge :tone="kvmTone" :label="kvmStatusLabel" />
+          <StatusBadge v-if="kvm.kvmEnabled" :tone="kvmTone" :label="kvmStatusLabel" />
           <StatusBadge :tone="pcTone" :label="pcStatusLabel" />
         </div>
       </div>
     </header>
 
     <div class="ip-panel" aria-label="KVM and PC addresses">
-      <div>
+      <div v-if="kvm.kvmEnabled">
         <span>KVM IP:</span>
         <a :href="kvm.websiteUrl" target="_blank" rel="noreferrer">{{ kvm.ip }}</a>
       </div>
@@ -31,34 +31,35 @@
       </div>
     </div>
 
+    <p v-if="!kvm.kvmEnabled" class="agent-only-note">Host-agent only · LuckFox KVM controls are hidden for this device.</p>
     <p class="notes">{{ kvm.notes || 'No notes yet.' }}</p>
 
     <div class="status-lines">
-      <div><span>KVM online:</span><strong>{{ status?.kvmResponds ? 'online' : status?.authenticated ? 'login only' : 'offline' }}</strong></div>
+      <div v-if="kvm.kvmEnabled"><span>KVM online:</span><strong>{{ status?.kvmResponds ? 'online' : status?.authenticated ? 'login only' : 'offline' }}</strong></div>
       <div><span>PC online:</span><strong>{{ status?.pcResponds ? 'online' : 'offline' }}</strong></div>
-      <div><span>PC ping:</span><strong>{{ status?.pcLatencyMs ?? '—' }} ms · {{ timeAgo(status?.pcCheckedAt) }}</strong></div>
-      <div><span>Power LED:</span><strong>{{ status?.hostPower || 'unknown' }}</strong></div>
-      <div><span>Video:</span><strong>{{ videoLabel(status?.video) }}</strong></div>
-      <div><span>USB:</span><strong>{{ usbLabel(status?.usb) }}</strong></div>
+      <div v-if="kvm.pcUrl"><span>PC ping:</span><strong>{{ status?.pcLatencyMs ?? '—' }} ms · {{ timeAgo(status?.pcCheckedAt) }}</strong></div>
+      <div v-if="kvm.kvmEnabled"><span>Power LED:</span><strong>{{ status?.hostPower || 'unknown' }}</strong></div>
+      <div v-if="kvm.kvmEnabled"><span>Video:</span><strong>{{ videoLabel(status?.video) }}</strong></div>
+      <div v-if="kvm.kvmEnabled"><span>USB:</span><strong>{{ usbLabel(status?.usb) }}</strong></div>
       <div><span>Host scripts:</span><strong>{{ scriptCountLabel }}</strong></div>
-      <div><span>KVM latency:</span><strong>{{ status?.latencyMs ?? '—' }} ms</strong></div>
+      <div v-if="kvm.kvmEnabled"><span>KVM latency:</span><strong>{{ status?.latencyMs ?? '—' }} ms</strong></div>
       <div><span>Checked:</span><strong>{{ timeAgo(status?.checkedAt) }}</strong></div>
     </div>
 
-    <p v-if="status?.error" class="inline-error">{{ status.error }}</p>
+    <p v-if="kvm.kvmEnabled && status?.error" class="inline-error">{{ status.error }}</p>
     <p v-if="status?.pcError && !status?.pcResponds" class="inline-error">PC host-agent: {{ status.pcError }}</p>
 
     <HostStatsPanel :stats="status?.hostStats" :error="status?.hostStatsError" />
 
     <div class="button-row">
-      <a class="btn secondary" :href="kvm.websiteUrl" target="_blank" rel="noreferrer">Open KVM</a>
+      <a v-if="kvm.kvmEnabled" class="btn secondary" :href="kvm.websiteUrl" target="_blank" rel="noreferrer">Open KVM</a>
       <a v-if="kvm.pcUrl" class="btn secondary" :href="kvm.pcUrl" target="_blank" rel="noreferrer">Open PC Agent</a>
       <ActionButton label="Refresh" :busy="busy === 'refresh'" @click="$emit('refresh')" />
-      <ActionButton label="Power" kind="primary" :busy="busy === 'power'" @click="emitAction('power')" />
-      <ActionButton label="Arrow Up" kind="primary" :busy="busy === 'arrowUp'" @click="emitAction('arrowUp')" />
+      <ActionButton v-if="kvm.kvmEnabled" label="Power" kind="primary" :busy="busy === 'power'" @click="emitAction('power')" />
+      <ActionButton v-if="kvm.kvmEnabled" label="Arrow Up" kind="primary" :busy="busy === 'arrowUp'" @click="emitAction('arrowUp')" />
     </div>
 
-    <details class="details-block">
+    <details v-if="kvm.kvmEnabled" class="details-block">
       <summary>More API controls</summary>
       <section class="control-section">
         <h3>Host power</h3>
@@ -110,6 +111,7 @@ const emit = defineEmits<{
 
 const kvmTone = computed(() => statusTone(props.status));
 const kvmStatusLabel = computed(() => {
+  if (!props.kvm.kvmEnabled) return 'KVM disabled';
   if (!props.status) return 'KVM pending';
   if (props.status.error) return 'KVM error';
   return props.status.kvmResponds ? 'KVM online' : props.status.authenticated ? 'KVM login only' : 'KVM offline';

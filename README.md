@@ -1,8 +1,8 @@
 # LuckFox KVM Matrix
 
-A Matrix-themed Vue/TypeScript dashboard for controlling multiple LuckFox PicoKVM devices from one place. It shows one rounded card per KVM, shows both the KVM IP and the PC/host-agent URL, tracks separate online status for the KVM and PC every 15 seconds, checks KVM/login/video/USB status, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent.
+A Matrix-themed Vue/TypeScript dashboard for controlling LuckFox PicoKVM devices and/or host-agent-only machines from one place. It shows one rounded card per device, can show both the KVM IP and the PC/host-agent IP, tracks separate online status for the KVM and PC every 15 seconds, checks KVM/login/video/USB status when a KVM is enabled, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent. Devices without a physical KVM can set `kvm.enabled: false` or simply `kvm: false`; their cards keep PC status/stats/scripts and hide the KVM controls.
 
-> **Security note:** This dashboard can send power, keyboard, mouse, virtual media, Wake-on-LAN, and host-side script execution commands. Run it only on a trusted LAN/VPN. Do not expose the dashboard or the host-agent service directly to the public internet.
+> **Security note:** This dashboard can send power, keyboard, mouse, virtual media, Wake-on-LAN, host-side script execution, reboot, and force power-off commands. Run it only on a trusted LAN/VPN. Do not expose the dashboard or the host-agent service directly to the public internet.
 
 ---
 
@@ -170,6 +170,16 @@ Set the same value in `kvm.config.json`:
       "id": "script2",
       "label": "AM4 Example Script 2",
       "description": "Second example script. Rename this to something meaningful."
+    },
+    {
+      "id": "power_off_force",
+      "label": "Force Power Off AM4",
+      "description": "Force powers off the host through the host agent."
+    },
+    {
+      "id": "reboot_pc",
+      "label": "Reboot AM4",
+      "description": "Reboots the host through the host agent."
     }
   ]
 }
@@ -198,14 +208,16 @@ A `401 Unauthorized` response means the Bearer token does not match `AGENT_TOKEN
 
 ## Multiple host scripts
 
-Each KVM card has a top-right **Scripts** dropdown. Every entry in `hostAgent.scripts[]` appears there with its readable label and description.
+Each device card has a top-right **Scripts** dropdown. Every entry in `hostAgent.scripts[]` appears there with its readable label and description. This works even when `kvm.enabled` is `false`, so you can use the dashboard for script-only hosts that do not have a LuckFox KVM attached.
 
 The host agent runs scripts by `id`:
 
 ```text
-script id: host_action  ->  host-agent/scripts/host_action.py
-script id: script2      ->  host-agent/scripts/script2.py
-script id: backup       ->  host-agent/scripts/backup.py
+script id: host_action      ->  host-agent/scripts/host_action.py
+script id: script2          ->  host-agent/scripts/script2.py
+script id: power_off_force  ->  host-agent/scripts/power_off_force.py
+script id: reboot_pc        ->  host-agent/scripts/reboot_pc.py
+script id: backup           ->  host-agent/scripts/backup.py
 ```
 
 To add another script:
@@ -216,7 +228,7 @@ To add another script:
 host-agent/scripts/backup.py
 ```
 
-2. Add a matching config entry under the target KVM:
+2. Add a matching config entry under the target device:
 
 ```json
 {
@@ -277,6 +289,70 @@ KVM_PAYLOAD_JSON
 
 ---
 
+## Built-in reboot and force power-off scripts
+
+Version `1.3.4` includes two extra example scripts in the host agent:
+
+```text
+host-agent/scripts/power_off_force.py
+host-agent/scripts/reboot_pc.py
+```
+
+They are already listed in the example `kvm.config.json`, so they appear in the card's **Scripts** dropdown as readable actions such as **Force Power Off AM4** and **Reboot AM4**.
+
+These scripts are guarded by default. The agent will refuse to run them until this environment variable is enabled on the target host:
+
+```yaml
+services:
+  host-script-agent:
+    environment:
+      ALLOW_HOST_POWER_COMMANDS: "true"
+```
+
+For Linux hosts running the agent inside Docker, shutting down or rebooting the actual host usually also requires the agent container to run with host privileges. In `host-agent/docker-compose.yaml`, uncomment these lines only on trusted machines:
+
+```yaml
+services:
+  host-script-agent:
+    privileged: true
+    pid: host
+```
+
+Then restart the agent:
+
+```bash
+cd host-agent
+docker compose up -d
+```
+
+Manual tests:
+
+```bash
+# Reboot the host
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{"scriptId":"reboot_pc","scriptLabel":"Reboot PC"}'
+
+# Force power off the host
+curl -X POST http://127.0.0.1:8799/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-agent-token" \
+  -d '{"scriptId":"power_off_force","scriptLabel":"Force Power Off"}'
+```
+
+You can override the exact commands without editing the script:
+
+```yaml
+environment:
+  POWER_OFF_COMMAND: "shutdown -h now"
+  REBOOT_COMMAND: "shutdown -r now"
+```
+
+On Docker Desktop for Windows/macOS, these scripts run inside the Linux container/VM view and usually cannot reboot or power off the physical host unless you replace them with a host-specific integration. For Windows hosts, use a native service, Task Scheduler, SSH, WinRM, or edit these scripts to call the mechanism you prefer.
+
+---
+
 ## Host stats visibility in Docker
 
 A container can normally only report what Docker exposes to it. The provided compose files include read-only mounts for a better Linux host view:
@@ -293,7 +369,7 @@ Remove those mounts if you only want container-visible stats.
 
 ---
 
-## Configure KVMs
+## Configure devices
 
 Edit:
 
@@ -303,19 +379,28 @@ kvm.config.json
 
 There are two different secrets:
 
-- `password` is the LuckFox web/local password used with `POST /auth/login-local`.
+- `kvm.password` is the LuckFox web/local password used with `POST /auth/login-local`.
 - `hostAgent.token` is the FastAPI host-agent Bearer token you generate yourself.
 
-Example:
+The preferred config separates the physical KVM from the PC/host agent. This lets one dashboard card be either:
+
+- **KVM + host agent** — full LuckFox controls plus scripts/stats.
+- **Host-agent only** — no LuckFox KVM connected; the card shows PC online/stats/scripts and hides all KVM controls.
+
+### Normal KVM + host-agent device
 
 ```json
 {
   "id": "am4",
   "name": "AM4",
-  "ip": "192.168.10.92",
-  "password": "pass",
   "notes": "AM4 workstation / test host",
-  "hostMacAddress": "",
+  "kvm": {
+    "enabled": true,
+    "ip": "192.168.10.92",
+    "password": "pass",
+    "protocol": "http",
+    "hostMacAddress": ""
+  },
   "hostAgent": {
     "enabled": true,
     "url": "http://192.168.10.92:8799",
@@ -331,6 +416,59 @@ Example:
         "id": "script2",
         "label": "AM4 Example Script 2",
         "description": "Example second script. Rename this label to match the task."
+      },
+      {
+        "id": "power_off_force",
+        "label": "Force Power Off AM4",
+        "description": "Runs the host-agent force power-off script on this PC."
+      },
+      {
+        "id": "reboot_pc",
+        "label": "Reboot AM4",
+        "description": "Runs the host-agent reboot script on this PC."
+      }
+    ]
+  }
+}
+```
+
+### Host-agent-only device, no KVM attached
+
+Use this when the PC has a FastAPI host agent but no LuckFox KVM. The dashboard will still display the card, PC online status, host stats, and Scripts dropdown, but it will hide KVM IP, KVM online status, Open KVM, Power, Arrow Up, raw RPC, keyboard/mouse, virtual media, and other KVM-only controls. You can use either `"kvm": { "enabled": false }` or the shorter `"kvm": false`.
+
+```json
+{
+  "id": "scriptbox",
+  "name": "ScriptBox",
+  "notes": "Host-agent-only automation box",
+  "kvm": {
+    "enabled": false
+  },
+  "hostAgent": {
+    "enabled": true,
+    "url": "http://192.168.10.150:8799",
+    "token": "change-me-agent-token",
+    "timeoutMs": 60000,
+    "scripts": [
+      {
+        "id": "host_action",
+        "label": "Run ScriptBox Script",
+        "description": "Default editable host action script."
+      },
+      {
+        "id": "script2",
+        "label": "ScriptBox Maintenance",
+        "description": "Example second script for this host."
+      },
+      {
+        "id": "power_off_force",
+        "label": "Force Power Off ScriptBox",
+        "description": "Runs the host-agent force power-off script on this PC."
+      },
+      {
+        "id": "reboot_pc",
+        "label": "Reboot ScriptBox",
+        "description": "Runs the host-agent reboot script on this PC."
       }
     ]
   }
@@ -343,11 +481,12 @@ Field reference:
 | --- | --- |
 | `id` | Stable internal id used by the app. Use lowercase letters/numbers/dashes. |
 | `name` | Display name shown on the card. |
-| `ip` | LuckFox KVM IP address. |
-| `password` | LuckFox local web password used with `/auth/login-local`. |
 | `notes` | Free text shown on the card. |
-| `protocol` | Optional, `http` by default. Use `https` only if the KVM supports it. |
-| `hostMacAddress` | Optional MAC address for Wake-on-LAN. |
+| `kvm.enabled` | Set `true` for a physical LuckFox KVM. Set `false` for host-agent-only devices. You can also set `kvm` itself to `false`. |
+| `kvm.ip` | LuckFox KVM IP address. Required only when `kvm.enabled` is true. |
+| `kvm.password` | LuckFox local web password used with `/auth/login-local`. Required only when `kvm.enabled` is true. |
+| `kvm.protocol` | Optional, `http` by default. Use `https` only if the KVM supports it. |
+| `kvm.hostMacAddress` | Optional MAC address for Wake-on-LAN. |
 | `hostAgent.enabled` | Enables/disables the host-agent integration. |
 | `hostAgent.url` | FastAPI agent URL on the target host. The dashboard displays only the hostname/IP part as **PC IP**. Example: `http://192.168.10.92:8799` displays as `192.168.10.92` and pings `http://192.168.10.92:8799/health` every refresh cycle. It may be different from the LuckFox KVM IP. |
 | `hostAgent.token` | Shared Bearer token sent to the FastAPI agent. |
@@ -357,7 +496,7 @@ Field reference:
 | `hostAgent.scripts[].description` | Optional helper text shown in the dropdown. |
 | `hostAgent.scripts[].timeoutMs` | Optional per-script timeout override. |
 
-Legacy single-script configs using `hostScript` still work, but `hostAgent.scripts[]` is the preferred format.
+Legacy configs using top-level `ip`, `password`, `protocol`, `hostMacAddress`, or single-script `hostScript` still work. New configs should prefer the nested `kvm` and `hostAgent.scripts[]` format.
 
 ---
 
@@ -366,10 +505,10 @@ Legacy single-script configs using `hostScript` still work, but `hostAgent.scrip
 LuckFox KVM Matrix has three parts:
 
 1. **Vue 3 + TypeScript frontend** — Matrix dashboard and component UI.
-2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC, and calls host agents.
+2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC when enabled, and calls host agents.
 3. **FastAPI host agent** — optional per-machine service for Python scripts and host stats.
 
-The browser talks only to the Node backend. The Node backend talks to KVMs and host agents.
+The browser talks only to the Node backend. The Node backend talks to enabled KVMs and configured host agents.
 
 This avoids browser CORS problems, keeps KVM passwords out of the frontend bundle, and lets host scripts run only on machines where you explicitly deploy the agent.
 
@@ -381,7 +520,7 @@ This avoids browser CORS problems, keeps KVM passwords out of the frontend bundl
 - Rounded card layout per KVM.
 - Central JSON configuration.
 - Separate KVM and PC online badges on every card.
-- KVM IP and clickable PC IP on every card. The PC IP is derived from `hostAgent.url` without protocol or port.
+- KVM IP when `kvm.enabled` is true, and clickable PC IP on every card with a host agent. The PC IP is derived from `hostAgent.url` without protocol or port.
 - PC reachability ping through host-agent `/health` every 15 seconds by default.
 - KVM responding/authenticated status.
 - Practical host power indicator based on HDMI/video readiness.
@@ -449,7 +588,9 @@ luckfox-kvm-matrix/
 │   │   └── main.py
 │   └── scripts/
 │       ├── host_action.py
-│       └── script2.py
+│       ├── script2.py
+│       ├── power_off_force.py
+│       └── reboot_pc.py
 └── __tests__/
     ├── KvmCard.test.ts
     ├── formatters.test.ts
@@ -464,7 +605,7 @@ luckfox-kvm-matrix/
 
 ### `src/components/KvmCard.vue`
 
-Renders one KVM card. It shows KVM IP, clickable PC IP derived from the host-agent URL, separate KVM/PC online badges, status lines, host stats, main buttons, and the top-right `HostScriptMenu` dropdown.
+Renders one device card. When `kvm.enabled` is true, it shows KVM IP, KVM status, and all KVM controls. When `kvm.enabled` is false, it hides KVM-only UI and keeps clickable PC IP, PC online status, host stats, Refresh, Open PC Agent, and the top-right `HostScriptMenu` dropdown.
 
 ### `src/components/HostScriptMenu.vue`
 
@@ -509,6 +650,14 @@ Default editable script.
 ### `host-agent/scripts/script2.py`
 
 Example second script showing how multiple named scripts work.
+
+### `host-agent/scripts/power_off_force.py`
+
+Guarded script for force powering off the target host. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
+
+### `host-agent/scripts/reboot_pc.py`
+
+Guarded script for rebooting the target host. Requires `ALLOW_HOST_POWER_COMMANDS=true` and, for most Linux Docker deployments, `privileged: true` plus `pid: host`.
 
 ---
 
@@ -711,11 +860,12 @@ The LuckFox KVM power-control pins or Ext board must be wired to the motherboard
 - Use long random host-agent tokens.
 - Run only on a private LAN or VPN.
 - Use firewall rules so only your dashboard machine can call host agents.
-- Avoid privileged containers unless a script truly needs it.
+- Avoid privileged containers unless a script truly needs it. The built-in reboot/power-off scripts are the main case where this may be needed.
 - Mount only the host directories your scripts actually need.
 - Do not commit real passwords or tokens to a public GitHub repo.
 
 ---
 
 ## License
-GPL-3.0
+
+Add your preferred license here.

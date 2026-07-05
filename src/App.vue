@@ -6,7 +6,7 @@
         <p class="eyebrow">LuckFox PicoKVM Control</p>
         <h1>KVM Matrix</h1>
         <p class="muted">
-          Local dashboard for LMDE, AM4, NAS, and PCMAIN. Passwords stay server-side in <code>kvm.config.json</code>.
+          Local dashboard for LuckFox KVMs and host-agent-only PCs. Passwords and agent tokens stay server-side in <code>kvm.config.json</code>.
         </p>
       </div>
       <div class="hero-actions">

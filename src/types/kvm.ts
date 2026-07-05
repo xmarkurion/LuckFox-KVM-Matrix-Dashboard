@@ -13,7 +13,9 @@ export interface HostScriptSummary {
 export interface KvmSummary {
   id: string;
   name: string;
-  /** LuckFox KVM device IP or host from kvm.config.json. */
+  /** True when this card has an enabled LuckFox KVM endpoint. False means host-agent-only. */
+  kvmEnabled: boolean;
+  /** LuckFox KVM device IP or host from kvm.config.json. Empty when kvmEnabled is false. */
   ip: string;
   /** Full URL used to open the LuckFox KVM web UI. */
   websiteUrl: string;

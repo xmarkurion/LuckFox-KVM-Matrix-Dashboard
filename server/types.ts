@@ -35,11 +35,26 @@ export interface LegacyHostScriptConfig {
   timeoutMs?: number;
 }
 
+export interface KvmEndpointConfig {
+  /** Set to false when this dashboard card should be agent-only with no LuckFox KVM controls. */
+  enabled?: boolean;
+  ip?: string;
+  password?: string;
+  protocol?: 'http' | 'https';
+  hostMacAddress?: string;
+}
+
 export interface KvmConfigEntry {
   id: string;
   name: string;
-  ip: string;
-  password: string;
+  /** Legacy LuckFox KVM device IP. Prefer kvm.ip for new configs. */
+  ip?: string;
+  /** Legacy LuckFox KVM password. Prefer kvm.password for new configs. */
+  password?: string;
+  /** Legacy quick switch. Prefer kvm.enabled for new configs. */
+  kvmEnabled?: boolean;
+  /** Preferred KVM-specific configuration. Set kvm.enabled=false for host-agent-only devices. */
+  kvm?: KvmEndpointConfig | false;
   notes?: string;
   protocol?: 'http' | 'https';
   hostMacAddress?: string;
@@ -61,7 +76,9 @@ export interface HostScriptSummary {
 export interface PublicKvm {
   id: string;
   name: string;
-  /** LuckFox KVM device IP or host from kvm.config.json. */
+  /** True when this card has an enabled LuckFox KVM endpoint. False means host-agent-only. */
+  kvmEnabled: boolean;
+  /** LuckFox KVM device IP or host from kvm.config.json. Empty when kvmEnabled is false. */
   ip: string;
   /** Full URL used to open the LuckFox KVM web UI. */
   websiteUrl: string;
