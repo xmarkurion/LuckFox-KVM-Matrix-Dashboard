@@ -921,5 +921,4 @@ The LuckFox KVM power-control pins or Ext board must be wired to the motherboard
 ---
 
 ## License
-
-Add your preferred license here.
+GPL-3.0
