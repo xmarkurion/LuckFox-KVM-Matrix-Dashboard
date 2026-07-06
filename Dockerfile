@@ -15,6 +15,7 @@ FROM node:22-alpine AS production
 WORKDIR /app
 
 ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
     PORT=8787 \
     KVM_CONFIG=/app/kvm.config.json
 

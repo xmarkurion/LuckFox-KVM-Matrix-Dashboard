@@ -1,68 +1,14 @@
-![alt text](./readme/two.png)
-
 # LuckFox KVM Matrix
-A Matrix-themed Vue/TypeScript dashboard for controlling LuckFox PicoKVM devices and/or host-agent-only machines from one place. 
-What's inside: 
-- Fully dockerized env no need of installing anything beside docker itself
-- JSON controlled cards per device ```kvm.config.json```
-- can show both the KVM IP and the PC/host-agent IP
-- tracks separate online status for the KVM and PC host script every 15 seconds
-- checks KVM/login/video/USB status when a KVM is enabled
-- displays optional host-agent stats,
-- link to the original KVM website,
-- sends keyboard/mouse/power/virtual-media actions,
-- can run named Python scripts on the target host through a small FastAPI agent.
-- devices without a physical KVM can set `kvm.enabled: false` or simply `kvm: false`; their cards keep PC status/stats/scripts and hide the KVM controls.
+
+A Matrix-themed Vue/TypeScript dashboard for controlling LuckFox PicoKVM devices and/or host-agent-only machines from one place. It shows one rounded card per device, can show both the KVM IP and the PC/host-agent IP, tracks separate online status for the KVM and PC every 15 seconds, checks KVM/login/video/USB status when a KVM is enabled, displays optional host-agent stats, opens the original KVM website, sends keyboard/mouse/power/virtual-media actions, and can run named Python scripts on the target host through a small FastAPI agent. Devices without a physical KVM can set `kvm.enabled: false` or simply `kvm: false`; their cards keep PC status/stats/scripts and hide the KVM controls.
 
 > **Security note:** This dashboard can send power, keyboard, mouse, virtual media, Wake-on-LAN, host-side script execution, reboot, and force power-off commands. Run it only on a trusted LAN/VPN. Do not expose the dashboard or the host-agent service directly to the public internet.
 
 ---
 
-## What this app does
-
-LuckFox KVM Matrix has three parts:
-
-1. **Vue 3 + TypeScript frontend** — Matrix dashboard and component UI.
-2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC when enabled, and calls host agents.
-3. **FastAPI host agent** — optional per-machine service for Python scripts and host stats.
-
-The browser talks only to the Node backend. The Node backend talks to enabled KVMs and configured host agents.
-
-This avoids browser CORS problems, keeps KVM passwords out of the frontend bundle, and lets host scripts run only on machines where you explicitly deploy the agent.
-
----
-
-## Features
-
-- Matrix-style dashboard theme.
-- Rounded card layout per KVM.
-- Central JSON configuration.
-- Separate KVM and PC online badges on every card.
-- KVM IP when `kvm.enabled` is true, and clickable PC IP on every card with a host agent. The PC IP is derived from `hostAgent.url` without protocol or port.
-- PC reachability ping through host-agent `/health` every 15 seconds by default.
-- KVM responding/authenticated status.
-- Practical host power indicator based on HDMI/video readiness.
-- Video state, USB state, and keyboard LED state where available.
-- Host-agent stats under each PC card.
-- Top-right scripts dropdown per PC.
-- Multiple named host scripts per PC.
-- Direct button to open the original KVM website.
-- Power press, reset press, USB wakeup, Wake-on-LAN.
-- Arrow Up shortcut.
-- Ctrl+Alt+Del, custom key press, key combo, and typed text.
-- Mouse move/click/wheel controls.
-- Virtual media mount/unmount controls.
-- Reboot KVM action.
-- Raw JSON-RPC panel for firmware-specific methods.
-- Docker production build.
-- Jest tests and TypeScript checks.
-
----
-
-
 ## Easiest way to run: Docker
 
-Docker is the recommended production path. It builds the Vue frontend, compiles the TypeScript Node backend, and serves the whole dashboard on port `8787`.
+Docker is the recommended production path. It builds the Vue frontend, compiles the TypeScript Node backend, and serves the whole dashboard on port `8787`. The production server now binds to `0.0.0.0` by default, so other computers on your LAN can open it by using the dashboard host machine's LAN IP address.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/luckfox-kvm-matrix.git
@@ -72,10 +18,32 @@ nano kvm.config.json
 docker compose up -d --build
 ```
 
-Open:
+Open on the same machine:
 
 ```text
 http://localhost:8787
+```
+
+Open from another computer on the same LAN:
+
+```text
+http://<dashboard-host-ip>:8787
+```
+
+Example:
+
+```text
+http://192.168.10.50:8787
+```
+
+Find the dashboard host IP:
+
+```bash
+# Linux / macOS
+ip addr
+
+# Windows PowerShell
+ipconfig
 ```
 
 Useful Docker commands:
@@ -97,28 +65,24 @@ docker compose down
 docker exec luckfox-kvm-matrix wget -qO- http://127.0.0.1:8787/api/health
 ```
 
-Make sure you can type ```docker ps``` in your cmd and it's return's something. 
-I found out once trying to debug my code that my docker engine was not running. 
+If Docker fails with `dockerDesktopLinuxEngine`, Docker Desktop is not running. Start Docker Desktop and make sure it is using Linux containers.
 
 ---
 
-# FastAPI host agent for scripts and stats.
-A way to execute Scripts on HOST machine.
+## Optional: FastAPI host agent for scripts and stats
 
-The dashboard itself does **not** execute Python on your machines. 
-For host-side actions, run the included FastAPI **host agent** on the machine where the Python scripts should execute.
-To do so clone the repository on host machine then enter folder host-agent and use ```docker compose up -d``` there. 
-If you do wnat power off script to work as well you do need to modify docker-compose.yaml follow instruction in file. 
+The dashboard itself does **not** execute Python on your machines. For host-side actions, run the included FastAPI **host agent** on the machine where the Python scripts should execute.
 
 The host agent provides:
+
 - `GET /health`
 - `GET /stats`
 - `GET /scripts`
 - `POST /run`
 
-The dashboard uses the same agent to show host stats under each card:
-The dashboard derives the displayed **PC IP** from `hostAgent.url`. 
-Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` to show a separate **PC online/offline** badge beside the KVM online badge.
+The dashboard uses the same agent to show host stats under each PC card:
+
+The dashboard derives the displayed **PC IP** from `hostAgent.url`. For example, if the agent URL is `http://192.168.10.92:8799`, the card shows **PC IP: `192.168.10.92`** but still links that value to the full agent URL. Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` to show a separate **PC online/offline** badge beside the KVM online badge.
 
 - CPU usage, logical/physical cores, load average, frequency where visible
 - memory and swap usage
@@ -131,6 +95,7 @@ Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` 
 - top visible processes
 
 ### Run dashboard plus a local test agent
+
 From the repo root:
 
 ```bash
@@ -150,11 +115,13 @@ curl http://localhost:8799/health
 ```
 
 Stats check:
+
 ```bash
 curl -H "Authorization: Bearer change-me-agent-token" http://localhost:8799/stats
 ```
 
 ### Run the agent standalone on a target machine
+
 Copy only the `host-agent/` folder to the target PC, then run:
 
 ```bash
@@ -171,27 +138,35 @@ http://<target-machine-ip>:8799
 ---
 
 ## Host-agent token
-The host-agent token **sould be canged** . It is a shared secret you generate yourself.
+
+The host-agent token is **not** from LuckFox. It is a shared secret you generate yourself.
 
 The same token must be set in two places:
+
 1. `AGENT_TOKEN` in the host-agent Docker Compose file.
 2. `hostAgent.token` in `kvm.config.json` for the matching PC.
 
-### To enerate a token:
+Generate a token:
+
 ```bash
 # Linux/macOS/Git Bash
 openssl rand -hex 32
 ```
+
 Or with Python, including on Windows:
+
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
 Or PowerShell:
+
 ```powershell
 [Convert]::ToHexString((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
 ```
 
 Set it in `host-agent/docker-compose.yaml`:
+
 ```yaml
 services:
   host-script-agent:
@@ -200,11 +175,12 @@ services:
 ```
 
 Set the same value in `kvm.config.json`:
+
 ```json
 "hostAgent": {
   "enabled": true,
   "url": "http://192.168.10.92:8799",
-  "token": "REPLACE_WITH_YOUR_TOKEN",
+  "token": "REPLACE_WITH_LONG_RANDOM_TOKEN",
   "timeoutMs": 60000,
   "scripts": [
     {
@@ -237,6 +213,7 @@ Set the same value in `kvm.config.json`:
 ```
 
 Restart after changing tokens:
+
 ```bash
 # on the target host running the agent
 cd host-agent
@@ -247,6 +224,7 @@ docker compose restart luckfox-kvm-matrix
 ```
 
 Test the token:
+
 ```bash
 curl -H "Authorization: Bearer REPLACE_WITH_LONG_RANDOM_TOKEN" http://192.168.10.92:8799/stats
 ```
@@ -256,6 +234,7 @@ A `401 Unauthorized` response means the Bearer token does not match `AGENT_TOKEN
 ---
 
 ## Multiple host scripts
+
 Each device card has a top-right **Scripts** dropdown. Every entry in `hostAgent.scripts[]` appears there with its readable label and description. This works even when `kvm.enabled` is `false`, so you can use the dashboard for script-only hosts that do not have a LuckFox KVM attached.
 
 The host agent runs scripts by `id`:
@@ -590,6 +569,47 @@ Legacy configs using top-level `ip`, `password`, `protocol`, `hostMacAddress`, o
 
 ---
 
+## What this app does
+
+LuckFox KVM Matrix has three parts:
+
+1. **Vue 3 + TypeScript frontend** — Matrix dashboard and component UI.
+2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC when enabled, and calls host agents.
+3. **FastAPI host agent** — optional per-machine service for Python scripts and host stats.
+
+The browser talks only to the Node backend. The Node backend talks to enabled KVMs and configured host agents.
+
+This avoids browser CORS problems, keeps KVM passwords out of the frontend bundle, and lets host scripts run only on machines where you explicitly deploy the agent.
+
+---
+
+## Features
+
+- Matrix-style dashboard theme.
+- Rounded card layout per KVM.
+- Central JSON configuration.
+- Separate KVM and PC online badges on every card.
+- KVM IP when `kvm.enabled` is true, and clickable PC IP on every card with a host agent. The PC IP is derived from `hostAgent.url` without protocol or port.
+- PC reachability ping through host-agent `/health` every 15 seconds by default.
+- KVM responding/authenticated status.
+- Practical host power indicator based on HDMI/video readiness.
+- Video state, USB state, and keyboard LED state where available.
+- Host-agent stats under each PC card.
+- Top-right scripts dropdown per PC.
+- Multiple named host scripts per PC.
+- Direct button to open the original KVM website.
+- Power press, reset press, USB wakeup, Wake-on-LAN.
+- Arrow Up shortcut.
+- Ctrl+Alt+Del, custom key press, key combo, and typed text.
+- Mouse move/click/wheel controls.
+- Virtual media mount/unmount controls.
+- Reboot KVM action.
+- Raw JSON-RPC panel for firmware-specific methods.
+- Docker production build.
+- Jest tests and TypeScript checks.
+
+---
+
 ## Project structure
 
 ```text
@@ -845,6 +865,76 @@ curl -X POST http://localhost:8787/api/kvms/am4/rpc \
 ---
 
 ## Troubleshooting
+
+
+### Cannot open the dashboard from another computer on the LAN
+
+The app must listen on all interfaces and Docker must publish the port on the host. This release sets both defaults:
+
+```yaml
+ports:
+  - "0.0.0.0:8787:8787"
+environment:
+  HOST: "0.0.0.0"
+  PORT: 8787
+```
+
+Recreate the container after updating compose files:
+
+```bash
+docker compose up -d --force-recreate --build
+```
+
+Check that Docker published the port:
+
+```bash
+docker compose ps
+docker port luckfox-kvm-matrix
+```
+
+Expected output should include something like:
+
+```text
+0.0.0.0:8787
+```
+
+Check from the dashboard host itself:
+
+```bash
+curl http://127.0.0.1:8787/api/health
+curl http://<dashboard-host-ip>:8787/api/health
+```
+
+Then check from the other LAN computer:
+
+```bash
+curl http://<dashboard-host-ip>:8787/api/health
+```
+
+If the host can open it but another LAN computer cannot, the most likely cause is a host firewall. On Windows, open PowerShell as Administrator and allow the port:
+
+```powershell
+New-NetFirewallRule -DisplayName "LuckFox KVM Matrix 8787" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787
+```
+
+On Linux with UFW:
+
+```bash
+sudo ufw allow 8787/tcp
+```
+
+On Linux with firewalld:
+
+```bash
+sudo firewall-cmd --add-port=8787/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+For local development, the Vite dev server also binds to `0.0.0.0`. Open the dev UI from another LAN computer with:
+
+```text
+http://<dashboard-host-ip>:5173
+```
 
 ### Browser says HTTP 502
 

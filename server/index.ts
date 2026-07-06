@@ -25,6 +25,7 @@ const ROOT = path.resolve(__dirname, '..');
 const CONFIG_PATH = process.env.KVM_CONFIG || path.join(ROOT, 'kvm.config.json');
 export const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as AppConfig;
 const PORT = Number(process.env.PORT || config.server?.port || 8787);
+const HOST = String(process.env.HOST || config.server?.host || '0.0.0.0');
 const REQUEST_TIMEOUT_MS = Number(config.server?.requestTimeoutMs || 8000);
 
 export const app = express();
@@ -700,7 +701,7 @@ function asyncHandler(handler: (req: Request, res: ExpressResponse, next: NextFu
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'luckfox-kvm-matrix', kvms: config.kvms.length });
+  res.json({ ok: true, service: 'luckfox-kvm-matrix', host: HOST, port: PORT, kvms: config.kvms.length });
 });
 
 app.get('/api/kvms', (_req, res) => {
@@ -768,7 +769,8 @@ app.use((err: ApiError, _req: Request, res: ExpressResponse, _next: NextFunction
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`LuckFox KVM API server listening on http://127.0.0.1:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    const shownHost = HOST === '0.0.0.0' || HOST === '::' ? '<this-machine-ip>' : HOST;
+    console.log(`LuckFox KVM dashboard listening on http://${shownHost}:${PORT}`);
   });
 }

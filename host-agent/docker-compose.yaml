@@ -10,7 +10,8 @@ services:
     # privileged: true
     # pid: host
     ports:
-      - "8799:8799"
+      # Bind to all host interfaces so the dashboard can reach http://<pc-ip>:8799.
+      - "0.0.0.0:8799:8799"
     environment:
       AGENT_TOKEN: change-me-agent-token
       SCRIPTS_DIR: /scripts

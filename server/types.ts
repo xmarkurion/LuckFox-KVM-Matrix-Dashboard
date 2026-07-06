@@ -5,6 +5,8 @@ export interface JsonRecord {
 }
 
 export interface ServerConfig {
+  /** Host/interface for the Node dashboard server. Use 0.0.0.0 for LAN/Docker access. */
+  host?: string;
   port?: number;
   requestTimeoutMs?: number;
   pollIntervalMs?: number;
