@@ -4,9 +4,9 @@
 A Matrix-themed Vue/TypeScript dashboard for controlling LuckFox PicoKVM devices and/or host-agent-only machines from one place. 
 What's inside: 
 - Fully dockerized env no need of installing anything beside docker itself
-- JSON controlled cards per device
+- JSON controlled cards per device ```kvm.config.json```
 - can show both the KVM IP and the PC/host-agent IP
-- tracks separate online status for the KVM and PC every 15 seconds
+- tracks separate online status for the KVM and PC host script every 15 seconds
 - checks KVM/login/video/USB status when a KVM is enabled
 - displays optional host-agent stats,
 - link to the original KVM website,
@@ -55,24 +55,28 @@ docker compose down
 docker exec luckfox-kvm-matrix wget -qO- http://127.0.0.1:8787/api/health
 ```
 
-If Docker fails with `dockerDesktopLinuxEngine`, Docker Desktop is not running. Start Docker Desktop and make sure it is using Linux containers.
+Make sure you can type ```docker ps``` in your cmd and it's return's something. 
+I found out once trying to debug my code that my docker engine was not running. 
 
 ---
 
-## Optional: FastAPI host agent for scripts and stats
+# FastAPI host agent for scripts and stats.
+A way to execute Scripts on HOST machine.
 
-The dashboard itself does **not** execute Python on your machines. For host-side actions, run the included FastAPI **host agent** on the machine where the Python scripts should execute.
+The dashboard itself does **not** execute Python on your machines. 
+For host-side actions, run the included FastAPI **host agent** on the machine where the Python scripts should execute.
+To do so clone the repository on host machine then enter folder host-agent and use ```docker compose up -d``` there. 
+If you do wnat power off script to work as well you do need to modify docker-compose.yaml follow instruction in file. 
 
 The host agent provides:
-
 - `GET /health`
 - `GET /stats`
 - `GET /scripts`
 - `POST /run`
 
-The dashboard uses the same agent to show host stats under each PC card:
-
-The dashboard derives the displayed **PC IP** from `hostAgent.url`. For example, if the agent URL is `http://192.168.10.92:8799`, the card shows **PC IP: `192.168.10.92`** but still links that value to the full agent URL. Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` to show a separate **PC online/offline** badge beside the KVM online badge.
+The dashboard uses the same agent to show host stats under each card:
+The dashboard derives the displayed **PC IP** from `hostAgent.url`. 
+Every dashboard refresh, by default every `15s`, calls `<hostAgent.url>/health` to show a separate **PC online/offline** badge beside the KVM online badge.
 
 - CPU usage, logical/physical cores, load average, frequency where visible
 - memory and swap usage
@@ -85,7 +89,6 @@ The dashboard derives the displayed **PC IP** from `hostAgent.url`. For example,
 - top visible processes
 
 ### Run dashboard plus a local test agent
-
 From the repo root:
 
 ```bash
@@ -105,13 +108,11 @@ curl http://localhost:8799/health
 ```
 
 Stats check:
-
 ```bash
 curl -H "Authorization: Bearer change-me-agent-token" http://localhost:8799/stats
 ```
 
 ### Run the agent standalone on a target machine
-
 Copy only the `host-agent/` folder to the target PC, then run:
 
 ```bash
@@ -128,35 +129,27 @@ http://<target-machine-ip>:8799
 ---
 
 ## Host-agent token
-
-The host-agent token is **not** from LuckFox. It is a shared secret you generate yourself.
+The host-agent token **sould be canged** . It is a shared secret you generate yourself.
 
 The same token must be set in two places:
-
 1. `AGENT_TOKEN` in the host-agent Docker Compose file.
 2. `hostAgent.token` in `kvm.config.json` for the matching PC.
 
-Generate a token:
-
+### To enerate a token:
 ```bash
 # Linux/macOS/Git Bash
 openssl rand -hex 32
 ```
-
 Or with Python, including on Windows:
-
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
-
 Or PowerShell:
-
 ```powershell
 [Convert]::ToHexString((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
 ```
 
 Set it in `host-agent/docker-compose.yaml`:
-
 ```yaml
 services:
   host-script-agent:
@@ -165,12 +158,11 @@ services:
 ```
 
 Set the same value in `kvm.config.json`:
-
 ```json
 "hostAgent": {
   "enabled": true,
   "url": "http://192.168.10.92:8799",
-  "token": "REPLACE_WITH_LONG_RANDOM_TOKEN",
+  "token": "REPLACE_WITH_YOUR_TOKEN",
   "timeoutMs": 60000,
   "scripts": [
     {
@@ -203,7 +195,6 @@ Set the same value in `kvm.config.json`:
 ```
 
 Restart after changing tokens:
-
 ```bash
 # on the target host running the agent
 cd host-agent
@@ -214,7 +205,6 @@ docker compose restart luckfox-kvm-matrix
 ```
 
 Test the token:
-
 ```bash
 curl -H "Authorization: Bearer REPLACE_WITH_LONG_RANDOM_TOKEN" http://192.168.10.92:8799/stats
 ```
@@ -224,7 +214,6 @@ A `401 Unauthorized` response means the Bearer token does not match `AGENT_TOKEN
 ---
 
 ## Multiple host scripts
-
 Each device card has a top-right **Scripts** dropdown. Every entry in `hostAgent.scripts[]` appears there with its readable label and description. This works even when `kvm.enabled` is `false`, so you can use the dashboard for script-only hosts that do not have a LuckFox KVM attached.
 
 The host agent runs scripts by `id`:
