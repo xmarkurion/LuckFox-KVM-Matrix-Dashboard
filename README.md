@@ -18,6 +18,48 @@ What's inside:
 
 ---
 
+## What this app does
+
+LuckFox KVM Matrix has three parts:
+
+1. **Vue 3 + TypeScript frontend** — Matrix dashboard and component UI.
+2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC when enabled, and calls host agents.
+3. **FastAPI host agent** — optional per-machine service for Python scripts and host stats.
+
+The browser talks only to the Node backend. The Node backend talks to enabled KVMs and configured host agents.
+
+This avoids browser CORS problems, keeps KVM passwords out of the frontend bundle, and lets host scripts run only on machines where you explicitly deploy the agent.
+
+---
+
+## Features
+
+- Matrix-style dashboard theme.
+- Rounded card layout per KVM.
+- Central JSON configuration.
+- Separate KVM and PC online badges on every card.
+- KVM IP when `kvm.enabled` is true, and clickable PC IP on every card with a host agent. The PC IP is derived from `hostAgent.url` without protocol or port.
+- PC reachability ping through host-agent `/health` every 15 seconds by default.
+- KVM responding/authenticated status.
+- Practical host power indicator based on HDMI/video readiness.
+- Video state, USB state, and keyboard LED state where available.
+- Host-agent stats under each PC card.
+- Top-right scripts dropdown per PC.
+- Multiple named host scripts per PC.
+- Direct button to open the original KVM website.
+- Power press, reset press, USB wakeup, Wake-on-LAN.
+- Arrow Up shortcut.
+- Ctrl+Alt+Del, custom key press, key combo, and typed text.
+- Mouse move/click/wheel controls.
+- Virtual media mount/unmount controls.
+- Reboot KVM action.
+- Raw JSON-RPC panel for firmware-specific methods.
+- Docker production build.
+- Jest tests and TypeScript checks.
+
+---
+
+
 ## Easiest way to run: Docker
 
 Docker is the recommended production path. It builds the Vue frontend, compiles the TypeScript Node backend, and serves the whole dashboard on port `8787`.
@@ -545,47 +587,6 @@ Field reference:
 | `hostAgent.scripts[].timeoutMs` | Optional per-script timeout override. |
 
 Legacy configs using top-level `ip`, `password`, `protocol`, `hostMacAddress`, or single-script `hostScript` still work. New configs should prefer the nested `kvm` and `hostAgent.scripts[]` format.
-
----
-
-## What this app does
-
-LuckFox KVM Matrix has three parts:
-
-1. **Vue 3 + TypeScript frontend** — Matrix dashboard and component UI.
-2. **Node/Express + TypeScript backend proxy** — keeps KVM passwords server-side, manages KVM login cookies, calls KVM JSON-RPC when enabled, and calls host agents.
-3. **FastAPI host agent** — optional per-machine service for Python scripts and host stats.
-
-The browser talks only to the Node backend. The Node backend talks to enabled KVMs and configured host agents.
-
-This avoids browser CORS problems, keeps KVM passwords out of the frontend bundle, and lets host scripts run only on machines where you explicitly deploy the agent.
-
----
-
-## Features
-
-- Matrix-style dashboard theme.
-- Rounded card layout per KVM.
-- Central JSON configuration.
-- Separate KVM and PC online badges on every card.
-- KVM IP when `kvm.enabled` is true, and clickable PC IP on every card with a host agent. The PC IP is derived from `hostAgent.url` without protocol or port.
-- PC reachability ping through host-agent `/health` every 15 seconds by default.
-- KVM responding/authenticated status.
-- Practical host power indicator based on HDMI/video readiness.
-- Video state, USB state, and keyboard LED state where available.
-- Host-agent stats under each PC card.
-- Top-right scripts dropdown per PC.
-- Multiple named host scripts per PC.
-- Direct button to open the original KVM website.
-- Power press, reset press, USB wakeup, Wake-on-LAN.
-- Arrow Up shortcut.
-- Ctrl+Alt+Del, custom key press, key combo, and typed text.
-- Mouse move/click/wheel controls.
-- Virtual media mount/unmount controls.
-- Reboot KVM action.
-- Raw JSON-RPC panel for firmware-specific methods.
-- Docker production build.
-- Jest tests and TypeScript checks.
 
 ---
 
