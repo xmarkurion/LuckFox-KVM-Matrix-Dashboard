@@ -7,7 +7,6 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    image: luckfox-kvm-matrix:1.4.1
     container_name: luckfox-kvm-matrix
     init: true
     restart: unless-stopped
@@ -36,7 +35,6 @@ services:
     build:
       context: ./host-agent
       dockerfile: Dockerfile
-    image: luckfox-host-script-agent:1.4.1
     container_name: luckfox-host-script-agent
     init: true
     restart: unless-stopped
