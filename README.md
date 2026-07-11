@@ -636,4 +636,5 @@ This project controls physical machines. Treat the dashboard and host-agent toke
 - prefer a reverse proxy with authentication if the dashboard must be exposed beyond the management network.
 
 ## License
-GPL-3.0
+
+Add the license that matches how you plan to distribute the project. No license is included by default.
