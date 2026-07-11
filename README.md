@@ -1,4 +1,3 @@
-![Screen](/readme/two.png)
 # LuckFox KVM Matrix
 
 A self-hosted dashboard for managing LuckFox PicoKVM devices and the PCs behind them.
@@ -637,5 +636,4 @@ This project controls physical machines. Treat the dashboard and host-agent toke
 - prefer a reverse proxy with authentication if the dashboard must be exposed beyond the management network.
 
 ## License
-
-Add the license that matches how you plan to distribute the project. No license is included by default.
+GPL-3.0
