@@ -1,3 +1,4 @@
+![Screen](/readme/two.png)
 # LuckFox KVM Matrix
 
 A self-hosted dashboard for managing LuckFox PicoKVM devices and the PCs behind them.
