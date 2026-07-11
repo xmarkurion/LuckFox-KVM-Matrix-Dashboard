@@ -5,7 +5,7 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 RUN npm run type-check && npm run build
@@ -20,7 +20,7 @@ ENV NODE_ENV=production \
     KVM_CONFIG=/app/kvm.config.json
 
 COPY package*.json ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY kvm.config.json ./kvm.config.json
 COPY --from=build /app/dist ./dist

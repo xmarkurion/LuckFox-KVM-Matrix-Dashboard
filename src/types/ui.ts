@@ -3,6 +3,7 @@ export type ButtonKind = 'primary' | 'secondary' | 'danger';
 export type ToastTone = 'good' | 'warn' | 'bad';
 export type MountMode = 'CDROM' | 'Disk';
 export type MouseButton = 'left' | 'right' | 'middle';
+export type DeviceFilter = 'all' | 'online' | 'offline' | 'agent-only';
 
 export interface ToastItem {
   id: string;

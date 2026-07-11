@@ -1,11 +1,15 @@
+name: luckfox-kvm-matrix
+
 services:
-  luckfox-kvm-matrix:
+  dashboard:
     # Build the image from this folder. No pre-existing/published image is required.
     build:
       context: .
       dockerfile: Dockerfile
       target: production
+    image: luckfox-kvm-matrix:1.4.1
     container_name: luckfox-kvm-matrix
+    init: true
     restart: unless-stopped
     ports:
       # Bind to all host interfaces so other machines on the LAN can open http://<dashboard-host-ip>:8787.
@@ -18,9 +22,6 @@ services:
     volumes:
       # Edit this file on the host to change KVM names, IPs, passwords, and notes.
       - ./kvm.config.json:/app/kvm.config.json:ro
-
-    # Optional: uncomment if you want a stable local image tag after build.
-    # image: luckfox-kvm-matrix:latest
 
     # If the container cannot reach 192.168.10.91-94 from Docker bridge networking,
     # uncomment the next line on Linux and remove/comment the ports section above.
@@ -35,7 +36,9 @@ services:
     build:
       context: ./host-agent
       dockerfile: Dockerfile
+    image: luckfox-host-script-agent:1.4.1
     container_name: luckfox-host-script-agent
+    init: true
     restart: unless-stopped
     # Linux host power/reboot scripts need these so commands target the host, not only the container.
     # Use only on trusted machines. Recreate the container after changing these.

@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response as ExpressResponse } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import type {
   ApiError,
   AppConfig,
@@ -29,6 +30,8 @@ const HOST = String(process.env.HOST || config.server?.host || '0.0.0.0');
 const REQUEST_TIMEOUT_MS = Number(config.server?.requestTimeoutMs || 8000);
 
 export const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', true);
 app.use(express.json({ limit: '1mb' }));
 
 const sessions = new Map<string, SessionState>();
@@ -694,14 +697,56 @@ async function runAction(kvm: KvmConfigEntry, action: string, body: RequestBody 
   }
 }
 
+function networkAddresses(): string[] {
+  const addresses = new Set<string>();
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (!entry.internal && entry.family === 'IPv4') {
+        addresses.add(entry.address);
+      }
+    }
+  }
+  return [...addresses];
+}
+
+function dashboardUrls(): string[] {
+  if (HOST !== '0.0.0.0' && HOST !== '::') return [`http://${HOST}:${PORT}`];
+  const addresses = networkAddresses();
+  return addresses.length ? addresses.map((address) => `http://${address}:${PORT}`) : [`http://127.0.0.1:${PORT}`];
+}
+
 function asyncHandler(handler: (req: Request, res: ExpressResponse, next: NextFunction) => Promise<void>): express.RequestHandler {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
 }
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'luckfox-kvm-matrix', host: HOST, port: PORT, kvms: config.kvms.length });
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'luckfox-kvm-matrix',
+    host: HOST,
+    port: PORT,
+    kvms: config.kvms.length,
+    urls: dashboardUrls(),
+    requestAddress: req.socket.localAddress,
+    remoteAddress: req.ip
+  });
+});
+
+app.get('/api/network', (req, res) => {
+  res.json({
+    ok: true,
+    bind: { host: HOST, port: PORT },
+    addresses: networkAddresses(),
+    urls: dashboardUrls(),
+    request: {
+      host: req.get('host') || '',
+      protocol: req.protocol,
+      remoteAddress: req.ip,
+      forwardedFor: req.get('x-forwarded-for') || ''
+    }
+  });
 });
 
 app.get('/api/kvms', (_req, res) => {
@@ -769,8 +814,13 @@ app.use((err: ApiError, _req: Request, res: ExpressResponse, _next: NextFunction
 });
 
 if (require.main === module) {
-  app.listen(PORT, HOST, () => {
-    const shownHost = HOST === '0.0.0.0' || HOST === '::' ? '<this-machine-ip>' : HOST;
-    console.log(`LuckFox KVM dashboard listening on http://${shownHost}:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`LuckFox KVM dashboard listening on ${HOST}:${PORT}`);
+    for (const url of dashboardUrls()) console.log(`  ${url}`);
+  });
+
+  server.on('error', (error) => {
+    console.error('Dashboard server failed to listen:', error);
+    process.exitCode = 1;
   });
 }

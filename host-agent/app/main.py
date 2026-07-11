@@ -32,7 +32,7 @@ SCRIPT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 if Path(HOST_PROC_PATH).exists():
     psutil.PROCFS_PATH = HOST_PROC_PATH
 
-app = FastAPI(title="LuckFox Host Script Agent", version="1.3.6")
+app = FastAPI(title="LuckFox Host Script Agent", version="1.4.1")
 
 
 class KvmContext(BaseModel):
