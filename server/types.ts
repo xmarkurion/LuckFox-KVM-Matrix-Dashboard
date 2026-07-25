@@ -232,3 +232,18 @@ export interface ServerAction {
 }
 
 export type RequestBody = Record<string, unknown>;
+
+export interface ConfigBackupSummary {
+  name: string;
+  createdAt: string;
+  sizeBytes: number;
+}
+
+export interface ConfigApiResponse {
+  config: AppConfig;
+  configPath: string;
+  backupPath: string;
+  writable: boolean;
+  maxBackups: number;
+  restartRequiredFields: string[];
+}

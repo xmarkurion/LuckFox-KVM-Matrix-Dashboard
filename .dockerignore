@@ -9,3 +9,5 @@ coverage
 .env.*
 *.zip
 .DS_Store
+
+backups/*.json

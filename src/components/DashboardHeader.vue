@@ -29,10 +29,13 @@
     </div>
 
     <div class="header-actions">
-      <button class="btn primary refresh-all" type="button" :disabled="loading" @click="$emit('refresh')">
+      <div class="header-button-row">
+        <button class="btn secondary" type="button" @click="$emit('settings')">Settings</button>
+        <button class="btn primary refresh-all" type="button" :disabled="loading" @click="$emit('refresh')">
         <span v-if="loading" class="spinner" />
-        {{ loading ? 'Refreshing' : 'Refresh all' }}
-      </button>
+          {{ loading ? 'Refreshing' : 'Refresh all' }}
+        </button>
+      </div>
       <span class="tiny">Automatic refresh every {{ pollSeconds }}s</span>
     </div>
   </header>
@@ -51,5 +54,6 @@ defineProps<{
 
 defineEmits<{
   refresh: [];
+  settings: [];
 }>();
 </script>

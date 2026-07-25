@@ -15,14 +15,14 @@ FROM node:22-alpine AS production
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    HOST=0.0.0.0 \
-    PORT=8787 \
-    KVM_CONFIG=/app/kvm.config.json
+    KVM_CONFIG=/app/kvm.config.json \
+    KVM_BACKUP_DIR=/app/backups
 
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY kvm.config.json ./kvm.config.json
+RUN mkdir -p /app/backups
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
 

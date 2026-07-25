@@ -10,6 +10,7 @@
       :last-refresh-label="lastRefreshLabel"
       :loading="loading"
       @refresh="refreshStatuses"
+      @settings="settingsOpen = true"
     />
 
     <section v-if="error" class="alert panel" role="alert">
@@ -45,6 +46,7 @@
     </footer>
 
     <ToastStack :items="toasts" @remove="removeToast" />
+    <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="handleConfigSaved" />
   </main>
 </template>
 
@@ -54,6 +56,7 @@ import DashboardHeader from './components/DashboardHeader.vue';
 import DashboardToolbar from './components/DashboardToolbar.vue';
 import KvmGrid from './components/KvmGrid.vue';
 import MatrixBackground from './components/MatrixBackground.vue';
+import SettingsPanel from './components/SettingsPanel.vue';
 import ToastStack from './components/ToastStack.vue';
 import { fetchAllStatuses, fetchKvmStatus, fetchKvms, runKvmAction, runRawRpc } from './services/kvmApi';
 import { timeAgo } from './services/formatters';
@@ -70,6 +73,7 @@ const pollIntervalMs = ref(15000);
 const lastRefreshedAt = ref<string | null>(null);
 const searchQuery = ref('');
 const deviceFilter = ref<DeviceFilter>('all');
+const settingsOpen = ref(false);
 let intervalId: number | null = null;
 
 const kvmEnabledCount = computed(() => kvms.value.filter((kvm) => kvm.kvmEnabled).length);
@@ -123,6 +127,27 @@ async function loadKvms(): Promise<void> {
   const data = await fetchKvms();
   kvms.value = data.kvms;
   pollIntervalMs.value = data.pollIntervalMs || 15000;
+
+  const validIds = new Set(data.kvms.map((kvm) => kvm.id));
+  for (const id of Object.keys(statuses)) {
+    if (!validIds.has(id)) delete statuses[id];
+  }
+}
+
+function schedulePolling(): void {
+  if (intervalId) window.clearInterval(intervalId);
+  intervalId = window.setInterval(refreshStatuses, pollIntervalMs.value);
+}
+
+async function handleConfigSaved(): Promise<void> {
+  try {
+    await loadKvms();
+    schedulePolling();
+    await refreshStatuses();
+    addToast('Configuration reloaded from disk.', 'good');
+  } catch (err) {
+    addToast(errorMessage(err), 'bad');
+  }
 }
 
 async function refreshStatuses(): Promise<void> {
@@ -195,7 +220,7 @@ onMounted(async () => {
   try {
     await loadKvms();
     await refreshStatuses();
-    intervalId = window.setInterval(refreshStatuses, pollIntervalMs.value);
+    schedulePolling();
   } catch (err) {
     error.value = errorMessage(err);
   }

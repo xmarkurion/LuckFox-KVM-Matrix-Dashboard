@@ -1,5 +1,4 @@
 # LuckFox KVM Matrix
-
 A self-hosted dashboard for managing LuckFox PicoKVM devices and the PCs behind them.
 
 The dashboard combines three jobs that are usually spread across different tools:
@@ -8,145 +7,14 @@ The dashboard combines three jobs that are usually spread across different tools
 - check whether the KVM and the PC are reachable;
 - read host telemetry and run named Python maintenance scripts through the optional FastAPI host agent.
 
-The UI is designed for a desktop operations screen, but it also collapses cleanly onto phones and tablets. Credentials stay in the Node backend; the browser never receives KVM passwords or host-agent tokens.
+The UI is designed for a desktop operations screen, but it also collapses cleanly onto phones and tablets.  
+Credentials stay in the Node backend; the browser never receives KVM passwords or host-agent tokens.
 
-## First run without Docker
+# Tutorial how to deploy - video
+- in progress 
 
-Use Node.js 22 LTS for the most predictable local setup. The repository includes a public npm lockfile and pins every direct dependency, so installs do not depend on the environment where the archive was created.
-
-```bash
-npm ci
-npm start
-```
-
-`npm start` now performs a clean production build before starting the server. When it is ready, open:
-
-```text
-http://localhost:8787
-```
-
-To start an already-built checkout without rebuilding it, use:
-
-```bash
-npm run start:built
-```
-
-If an older archive left a partial install or cached registry configuration, clean it once and reinstall:
-
-**Windows PowerShell**
-
-```powershell
-Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
-npm cache clean --force
-npm config set registry https://registry.npmjs.org/
-npm ci
-npm start
-```
-
-**Linux / macOS**
-
-```bash
-rm -rf node_modules
-npm cache clean --force
-npm config set registry https://registry.npmjs.org/
-npm ci
-npm start
-```
-
-Do not delete the included `package-lock.json`; Docker and local installs use it for reproducible dependency versions.
-
-## Start here: Debian 13 with Docker
-
-For a Debian server on your LAN, use the host-network Compose file. This avoids Docker bridge/NAT surprises and lets the container reach the same KVM and host-agent addresses as Debian itself.
-
-```bash
-git clone <your-repository-url>
-cd luckfox-kvm-matrix
-
-# Review the device addresses and credentials first.
-nano kvm.config.json
-
-docker compose -f docker-compose.debian.yaml up -d --build
-```
-
-Check that the service is healthy:
-
-```bash
-curl http://127.0.0.1:8787/api/health
-hostname -I
-```
-
-Then open the dashboard from another computer:
-
-```text
-http://<debian-lan-ip>:8787
-```
-
-For example:
-
-```text
-http://192.168.10.50:8787
-```
-
-The Debian Compose file uses `network_mode: host`, so there is no Docker `ports:` mapping to inspect. The Node server still listens on `0.0.0.0:8787` and is exposed directly through the Debian host network.
-
-### If another computer still cannot connect
-
-Internet access from the Debian machine only proves outbound networking works. It does not prove that TCP port `8787` is reachable from the LAN.
-
-Run the included diagnostic script:
-
-```bash
-./scripts/diagnose-debian-network.sh
-```
-
-The important checks are:
-
-```bash
-# The container should be running.
-docker compose -f docker-compose.debian.yaml ps
-
-# Node should be listening on every interface.
-sudo ss -lntp | grep 8787
-
-# Both requests should succeed on the Debian host.
-curl http://127.0.0.1:8787/api/health
-curl http://$(hostname -I | awk '{print $1}'):8787/api/health
-
-# Useful server-side network information.
-curl http://127.0.0.1:8787/api/network
-```
-
-Expected listener examples:
-
-```text
-0.0.0.0:8787
-*:8787
-[::]:8787
-```
-
-If local requests work but another computer cannot connect, check the layers outside the application:
-
-- Debian `nftables`, UFW or another host firewall;
-- a VM firewall in Proxmox, VMware, Hyper-V or the cloud provider;
-- whether the VM network adapter is bridged to the LAN rather than isolated behind NAT;
-- VLAN, Wi-Fi client isolation or router rules between the two machines.
-
-Useful firewall inspection commands:
-
-```bash
-sudo nft list ruleset
-sudo ufw status verbose        # only when UFW is installed
-sudo firewall-cmd --list-all   # only when firewalld is installed
-```
-
-If UFW is the active firewall, allow the dashboard port with:
-
-```bash
-sudo ufw allow 8787/tcp
-```
-
-Do not expose port `8787` directly to the public internet. Put it behind a VPN, a trusted reverse proxy with authentication, or a private management VLAN.
+To fully deploy go with docker. First edit the file `kvm.config.json` with your settings and ip adresses. 
+And then you can go from there. There is optional host-agent that allows you to expand dashboard into something nice. 
 
 ## Cross-platform Docker deployment
 
@@ -162,8 +30,6 @@ Open:
 http://<docker-host-ip>:8787
 ```
 
-This is the better default for Docker Desktop on Windows or macOS. On Linux, the Debian host-network file is usually simpler when the dashboard must reach physical devices on the same LAN.
-
 Common commands:
 
 ```bash
@@ -178,6 +44,35 @@ Rebuild after source changes:
 ```bash
 docker compose up -d --build --force-recreate
 ```
+
+## Edit configuration from the dashboard
+
+Open **Settings** in the top-right corner of the dashboard. The editor writes directly to `kvm.config.json` and updates the running application without requiring a restart for device, credential, script, timeout or polling changes.
+
+The Settings panel includes:
+
+- a per-device editor for ID, name and notes;
+- optional LuckFox KVM settings: enabled state, IP, protocol, password and Wake-on-LAN MAC address;
+- optional host-agent settings: URL, token, timeout and enabled state;
+- add, remove, enable, rename and reorder script entries;
+- add and delete complete nodes;
+- server host, port, request timeout and polling interval;
+- a raw JSON editor for advanced or future fields;
+- backup creation, download, restore and deletion.
+
+Every save creates a copy of the previous configuration in `backups/`. Restoring a backup also backs up the current file first. The application keeps the newest 10 backups and removes older files automatically.
+
+Docker mounts both paths read-write:
+
+```yaml
+volumes:
+  - ./kvm.config.json:/app/kvm.config.json
+  - ./backups:/app/backups
+```
+
+Do not change the config mount back to `:ro`; the Settings panel will correctly report the file as read-only and saves will fail.
+
+Changes to KVM nodes and host agents are loaded immediately. Changes to `server.host` or `server.port` require a dashboard restart because those values control the already-running listener. When using bridge-mode Docker and changing the port, update the Compose `ports:` mapping as well.
 
 ## What the dashboard shows
 
@@ -199,7 +94,7 @@ A full device card includes:
 
 The dashboard refreshes status every 15 seconds by default. The interval is configured in `kvm.config.json`.
 
-The top bar adds an overview of device health, search by name/IP/note, and filters for online, offline and agent-only machines.
+The top bar is an overview of device health, search by name/IP/note, and filters for online, offline and agent-only machines.
 
 ## Architecture
 
@@ -228,8 +123,12 @@ The Vue application lives under `src/`.
 - `src/components/KvmCard.vue` renders one device and its quick actions.
 - `src/components/HostStatsPanel.vue` renders host telemetry.
 - `src/components/HostScriptMenu.vue` renders the named-script menu.
+- `src/components/SettingsPanel.vue` provides the configuration and backup workspace.
+- `src/components/NodeConfigEditor.vue` edits one node and all of its KVM/agent/script fields.
+- `src/components/BackupManager.vue` manages retained configuration snapshots.
 - keyboard, mouse, virtual-media and raw-RPC controls are separate components.
-- `src/services/kvmApi.ts` is the typed browser API client.
+- `src/services/kvmApi.ts` is the typed runtime-control API client.
+- `src/services/configApi.ts` is the typed configuration and backup client.
 - `src/types/` contains shared frontend interfaces.
 
 ### Dashboard backend
@@ -243,6 +142,13 @@ Useful endpoints:
 ```text
 GET  /api/health
 GET  /api/network
+GET  /api/config
+PUT  /api/config
+GET  /api/config/backups
+POST /api/config/backups
+POST /api/config/backups/:name/restore
+DELETE /api/config/backups/:name
+GET  /api/config/backups/:name/download
 GET  /api/kvms
 GET  /api/kvms/status
 GET  /api/kvms/:id/status
@@ -269,7 +175,7 @@ The script directory is bind-mounted into the container, so a `.py` file can be 
 
 ## Configure devices
 
-All devices are defined in `kvm.config.json`.
+The recommended workflow is **Settings → Devices** in the dashboard. The same data is stored as ordinary JSON in `kvm.config.json`, so it remains easy to review, version privately or edit by hand.
 
 ### KVM and host agent
 
@@ -354,11 +260,7 @@ When KVM is disabled, the card keeps PC status, telemetry and scripts but does n
 
 Keep `host` set to `0.0.0.0` for LAN access.
 
-After changing `kvm.config.json`, restart the dashboard container:
-
-```bash
-docker compose -f docker-compose.debian.yaml restart dashboard
-```
+Manual file edits are read when the dashboard starts. Saves made through the Settings panel are validated, written atomically and applied to the live process immediately. Restart only after changing `server.host` or `server.port`.
 
 ## Install the host agent
 
@@ -512,7 +414,8 @@ npm run build
 The repository currently includes Jest tests for:
 
 - KVM cards, including agent-only devices and emitted actions;
-- frontend API requests and error handling;
+- runtime and configuration API requests;
+- configuration editor defaults and normalization;
 - formatting helpers.
 
 Watch tests while developing:
@@ -543,6 +446,8 @@ The production server listens on `0.0.0.0:8787` unless overridden by `HOST` and 
 ├── docker-compose.yaml
 ├── docker-compose.debian.yaml
 ├── kvm.config.json
+├── backups/
+│   └── .gitkeep
 ├── package.json
 ├── server/
 │   ├── index.ts
@@ -596,6 +501,22 @@ Use the Debian host-network Compose file and run:
 
 If `curl http://<debian-ip>:8787/api/health` works on Debian but not from another PC, inspect firewalls, VM network mode and VLAN/router rules.
 
+### Settings says the configuration is read-only
+
+The dashboard container must have a read-write config mount and a persistent backup mount:
+
+```yaml
+volumes:
+  - ./kvm.config.json:/app/kvm.config.json
+  - ./backups:/app/backups
+```
+
+Make sure the host user running Docker can write both the file and the directory. Recreate the container after fixing the mount:
+
+```bash
+docker compose up -d --force-recreate
+```
+
 ### Dashboard opens, but KVM status is offline
 
 Test from the dashboard host:
@@ -630,6 +551,8 @@ This project controls physical machines. Treat the dashboard and host-agent toke
 
 - keep the dashboard on a trusted LAN or VPN;
 - do not commit real passwords or tokens to a public repository;
+- remember that opening Settings loads the editable configuration, including secrets, into that browser session;
+- do not expose the unauthenticated configuration API to untrusted users; place the dashboard behind VPN or authenticated reverse proxy access;
 - use a long random token for every host agent;
 - use firewall rules to limit port `8799` to the dashboard server;
 - enable privileged host power commands only on machines where they are required;

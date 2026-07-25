@@ -15,52 +15,13 @@ services:
       - "0.0.0.0:8787:8787"
     environment:
       NODE_ENV: production
-      HOST: "0.0.0.0"
-      PORT: 8787
       KVM_CONFIG: /app/kvm.config.json
+      KVM_BACKUP_DIR: /app/backups
     volumes:
-      # Edit this file on the host to change KVM names, IPs, passwords, and notes.
-      - ./kvm.config.json:/app/kvm.config.json:ro
+      # Mounted read-write so Settings can update the configuration.
+      - ./kvm.config.json:/app/kvm.config.json
+      - ./backups:/app/backups
 
     # If the container cannot reach 192.168.10.91-94 from Docker bridge networking,
     # uncomment the next line on Linux and remove/comment the ports section above.
     # network_mode: host
-
-
-  # Optional local host script agent. Use this only when the script should run on
-  # the same Docker host as the dashboard. For scripts on other target machines,
-  # copy the host-agent folder to that target and run its own docker compose file.
-  host-script-agent:
-    profiles: ["agent"]
-    build:
-      context: ./host-agent
-      dockerfile: Dockerfile
-    container_name: luckfox-host-script-agent
-    init: true
-    restart: unless-stopped
-    # Linux host power/reboot scripts need these so commands target the host, not only the container.
-    # Use only on trusted machines. Recreate the container after changing these.
-    # privileged: true
-    # pid: host
-    ports:
-      # Bind to all host interfaces so the dashboard can reach http://<pc-ip>:8799.
-      - "0.0.0.0:8799:8799"
-    environment:
-      AGENT_TOKEN: change-me-agent-token
-      SCRIPTS_DIR: /scripts
-      DEFAULT_SCRIPT_ID: host_action
-      SCRIPT_TIMEOUT_SECONDS: 60
-      HOST_PROC_PATH: /host/proc
-      HOST_ROOT_PATH: /host/root
-      STATS_MAX_PROCESSES: 8
-      # Safety guard for power_off_safe.py, power_off_force.py, and reboot_pc.py.
-      # Change to "true" only on trusted hosts where you want the agent to shut down/reboot the host.
-      ALLOW_HOST_POWER_COMMANDS: "false"
-      # Optional last-resort Linux SysRq fallback. This is abrupt. Enable only if normal shutdown/reboot methods fail.
-      ALLOW_SYSRQ_FORCE: "false"
-    volumes:
-      - ./host-agent/scripts:/scripts
-      # Optional host-stat mounts. These are read-only and let the agent report the host view,
-      # not just the container view. Remove them if you only want container-visible stats.
-      - /proc:/host/proc:ro
-      - /:/host/root:ro

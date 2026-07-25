@@ -5,6 +5,7 @@ import os from 'node:os';
 import type {
   ApiError,
   AppConfig,
+  ConfigBackupSummary,
   JsonRecord,
   JsonRpcEnvelope,
   JsonRpcRequestPayload,
@@ -23,11 +24,19 @@ import type {
 } from './types';
 
 const ROOT = path.resolve(__dirname, '..');
-const CONFIG_PATH = process.env.KVM_CONFIG || path.join(ROOT, 'kvm.config.json');
-export const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as AppConfig;
+const CONFIG_PATH = path.resolve(process.env.KVM_CONFIG || path.join(ROOT, 'kvm.config.json'));
+const BACKUP_PATH = path.resolve(process.env.KVM_BACKUP_DIR || path.join(ROOT, 'backups'));
+const MAX_CONFIG_BACKUPS = 10;
+const RESTART_REQUIRED_FIELDS = ['server.host', 'server.port'];
+
+function readConfigFile(filePath = CONFIG_PATH): AppConfig {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8')) as AppConfig;
+}
+
+export const config: AppConfig = readConfigFile();
 const PORT = Number(process.env.PORT || config.server?.port || 8787);
 const HOST = String(process.env.HOST || config.server?.host || '0.0.0.0');
-const REQUEST_TIMEOUT_MS = Number(config.server?.requestTimeoutMs || 8000);
+fs.mkdirSync(BACKUP_PATH, { recursive: true });
 
 export const app = express();
 app.disable('x-powered-by');
@@ -303,6 +312,233 @@ function isJsonRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw httpError(`${field} must be a non-empty string`, 400);
+  }
+  return value.trim();
+}
+
+function optionalPositiveNumber(value: unknown, field: string, minimum = 1): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < minimum) {
+    throw httpError(`${field} must be a number greater than or equal to ${minimum}`, 400);
+  }
+  return numberValue;
+}
+
+export function validateAppConfig(input: unknown): AppConfig {
+  if (!isPlainRecord(input)) throw httpError('Configuration must be a JSON object', 400);
+  if (!Array.isArray(input.kvms)) throw httpError('Configuration must contain a kvms array', 400);
+
+  if (input.server !== undefined) {
+    if (!isPlainRecord(input.server)) throw httpError('server must be an object', 400);
+    const server = input.server;
+    if (server.host !== undefined && typeof server.host !== 'string') throw httpError('server.host must be a string', 400);
+    optionalPositiveNumber(server.port, 'server.port', 1);
+    optionalPositiveNumber(server.requestTimeoutMs, 'server.requestTimeoutMs', 100);
+    optionalPositiveNumber(server.pollIntervalMs, 'server.pollIntervalMs', 1000);
+  }
+
+  const ids = new Set<string>();
+  for (const [nodeIndex, rawNode] of input.kvms.entries()) {
+    if (!isPlainRecord(rawNode)) throw httpError(`kvms[${nodeIndex}] must be an object`, 400);
+    const id = requireNonEmptyString(rawNode.id, `kvms[${nodeIndex}].id`);
+    requireNonEmptyString(rawNode.name, `kvms[${nodeIndex}].name`);
+    const normalizedId = normalizeId(id);
+    if (ids.has(normalizedId)) throw httpError(`Duplicate device id: ${id}`, 400);
+    ids.add(normalizedId);
+
+    if (rawNode.notes !== undefined && typeof rawNode.notes !== 'string') {
+      throw httpError(`kvms[${nodeIndex}].notes must be a string`, 400);
+    }
+
+    if (rawNode.kvm !== undefined && rawNode.kvm !== false) {
+      if (!isPlainRecord(rawNode.kvm)) throw httpError(`kvms[${nodeIndex}].kvm must be an object or false`, 400);
+      const kvm = rawNode.kvm;
+      if (kvm.enabled !== undefined && typeof kvm.enabled !== 'boolean') throw httpError(`kvms[${nodeIndex}].kvm.enabled must be boolean`, 400);
+      if (kvm.ip !== undefined && typeof kvm.ip !== 'string') throw httpError(`kvms[${nodeIndex}].kvm.ip must be a string`, 400);
+      if (kvm.password !== undefined && typeof kvm.password !== 'string') throw httpError(`kvms[${nodeIndex}].kvm.password must be a string`, 400);
+      if (kvm.protocol !== undefined && kvm.protocol !== 'http' && kvm.protocol !== 'https') {
+        throw httpError(`kvms[${nodeIndex}].kvm.protocol must be http or https`, 400);
+      }
+      if (kvm.hostMacAddress !== undefined && typeof kvm.hostMacAddress !== 'string') {
+        throw httpError(`kvms[${nodeIndex}].kvm.hostMacAddress must be a string`, 400);
+      }
+    }
+
+    if (rawNode.hostAgent !== undefined) {
+      if (!isPlainRecord(rawNode.hostAgent)) throw httpError(`kvms[${nodeIndex}].hostAgent must be an object`, 400);
+      const agent = rawNode.hostAgent;
+      if (agent.enabled !== undefined && typeof agent.enabled !== 'boolean') throw httpError(`kvms[${nodeIndex}].hostAgent.enabled must be boolean`, 400);
+      if (agent.url !== undefined && typeof agent.url !== 'string') throw httpError(`kvms[${nodeIndex}].hostAgent.url must be a string`, 400);
+      if (agent.token !== undefined && typeof agent.token !== 'string') throw httpError(`kvms[${nodeIndex}].hostAgent.token must be a string`, 400);
+      optionalPositiveNumber(agent.timeoutMs, `kvms[${nodeIndex}].hostAgent.timeoutMs`, 100);
+
+      const url = typeof agent.url === 'string' ? agent.url.trim() : '';
+      if (agent.enabled !== false && url) {
+        try {
+          const parsed = new URL(url);
+          if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('bad protocol');
+        } catch {
+          throw httpError(`kvms[${nodeIndex}].hostAgent.url must be a valid http(s) URL`, 400);
+        }
+      }
+
+      if (agent.scripts !== undefined) {
+        if (!Array.isArray(agent.scripts)) throw httpError(`kvms[${nodeIndex}].hostAgent.scripts must be an array`, 400);
+        const scriptIds = new Set<string>();
+        for (const [scriptIndex, rawScript] of agent.scripts.entries()) {
+          if (!isPlainRecord(rawScript)) throw httpError(`kvms[${nodeIndex}].hostAgent.scripts[${scriptIndex}] must be an object`, 400);
+          const scriptId = requireNonEmptyString(rawScript.id, `kvms[${nodeIndex}].hostAgent.scripts[${scriptIndex}].id`);
+          requireNonEmptyString(rawScript.label, `kvms[${nodeIndex}].hostAgent.scripts[${scriptIndex}].label`);
+          if (scriptIds.has(scriptId)) throw httpError(`Duplicate script id ${scriptId} on device ${id}`, 400);
+          scriptIds.add(scriptId);
+          if (rawScript.description !== undefined && typeof rawScript.description !== 'string') {
+            throw httpError(`kvms[${nodeIndex}].hostAgent.scripts[${scriptIndex}].description must be a string`, 400);
+          }
+          if (rawScript.enabled !== undefined && typeof rawScript.enabled !== 'boolean') {
+            throw httpError(`kvms[${nodeIndex}].hostAgent.scripts[${scriptIndex}].enabled must be boolean`, 400);
+          }
+          optionalPositiveNumber(rawScript.timeoutMs, `kvms[${nodeIndex}].hostAgent.scripts[${scriptIndex}].timeoutMs`, 100);
+        }
+      }
+    }
+  }
+
+  return cloneJson(input) as unknown as AppConfig;
+}
+
+function applyConfig(nextConfig: AppConfig): void {
+  const target = config as unknown as Record<string, unknown>;
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, cloneJson(nextConfig) as unknown as Record<string, unknown>);
+  sessions.clear();
+}
+
+function configFileWritable(): boolean {
+  try {
+    fs.accessSync(CONFIG_PATH, fs.constants.W_OK);
+    return true;
+  } catch {
+    try {
+      fs.accessSync(path.dirname(CONFIG_PATH), fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function backupFileName(reason: string): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeReason = reason.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'backup';
+  const suffix = Math.random().toString(16).slice(2, 8);
+  return `kvm.config.${timestamp}.${safeReason}.${suffix}.json`;
+}
+
+function backupSummary(filePath: string): ConfigBackupSummary {
+  const stat = fs.statSync(filePath);
+  return {
+    name: path.basename(filePath),
+    createdAt: stat.mtime.toISOString(),
+    sizeBytes: stat.size
+  };
+}
+
+function safeBackupFile(name: string): string {
+  const basename = path.basename(name);
+  if (basename !== name || !/^kvm\.config\..+\.json$/.test(basename)) {
+    throw httpError('Invalid backup name', 400);
+  }
+  const filePath = path.join(BACKUP_PATH, basename);
+  if (!fs.existsSync(filePath)) throw httpError(`Backup not found: ${basename}`, 404);
+  return filePath;
+}
+
+function listConfigBackups(): ConfigBackupSummary[] {
+  fs.mkdirSync(BACKUP_PATH, { recursive: true });
+  return fs.readdirSync(BACKUP_PATH)
+    .filter((name) => /^kvm\.config\..+\.json$/.test(name))
+    .map((name) => backupSummary(path.join(BACKUP_PATH, name)))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function pruneConfigBackups(): void {
+  for (const backup of listConfigBackups().slice(MAX_CONFIG_BACKUPS)) {
+    fs.rmSync(path.join(BACKUP_PATH, backup.name), { force: true });
+  }
+}
+
+function createConfigBackup(reason = 'manual'): ConfigBackupSummary {
+  if (!fs.existsSync(CONFIG_PATH)) throw httpError(`Configuration file does not exist: ${CONFIG_PATH}`, 500);
+  fs.mkdirSync(BACKUP_PATH, { recursive: true });
+  const target = path.join(BACKUP_PATH, backupFileName(reason));
+  fs.copyFileSync(CONFIG_PATH, target);
+  pruneConfigBackups();
+  return backupSummary(target);
+}
+
+function writeConfigAtomically(nextConfig: AppConfig): void {
+  const directory = path.dirname(CONFIG_PATH);
+  fs.mkdirSync(directory, { recursive: true });
+  const tempPath = path.join(directory, `.${path.basename(CONFIG_PATH)}.${process.pid}.${Date.now()}.tmp`);
+  const contents = `${JSON.stringify(nextConfig, null, 2)}\n`;
+  const currentStat = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH) : null;
+  const fileMode = currentStat ? currentStat.mode & 0o777 : 0o600;
+
+  try {
+    fs.writeFileSync(tempPath, contents, { encoding: 'utf8', mode: fileMode });
+    if (currentStat && process.platform !== 'win32') {
+      try {
+        fs.chownSync(tempPath, currentStat.uid, currentStat.gid);
+      } catch {
+        // Some container/filesystem combinations do not permit chown. The write can still proceed.
+      }
+    }
+    try {
+      fs.renameSync(tempPath, CONFIG_PATH);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'EBUSY') throw error;
+      fs.copyFileSync(tempPath, CONFIG_PATH);
+      fs.rmSync(tempPath, { force: true });
+    }
+  } catch (error) {
+    fs.rmSync(tempPath, { force: true });
+    const message = error instanceof Error ? error.message : String(error);
+    throw httpError(`Unable to write ${CONFIG_PATH}. Check that the Docker config volume is mounted read-write. ${message}`, 500);
+  }
+}
+
+function saveConfig(nextInput: unknown, reason = 'before-save'): { config: AppConfig; backup: ConfigBackupSummary } {
+  const nextConfig = validateAppConfig(nextInput);
+  const backup = createConfigBackup(reason);
+  writeConfigAtomically(nextConfig);
+  applyConfig(nextConfig);
+  pruneConfigBackups();
+  return { config: cloneJson(config), backup };
+}
+
+function restoreConfigBackup(name: string): { config: AppConfig; backup: ConfigBackupSummary } {
+  const sourcePath = safeBackupFile(name);
+  const restored = validateAppConfig(readConfigFile(sourcePath));
+  const backup = createConfigBackup('before-restore');
+  writeConfigAtomically(restored);
+  applyConfig(restored);
+  pruneConfigBackups();
+  return { config: cloneJson(config), backup };
+}
+
 function jsonRpcPayload(method: string, params: JsonRecord = {}): JsonRpcRequestPayload {
   // LuckFox/PicoKVM firmware is happier when params is always present.
   // This matches the curl command that was confirmed working:
@@ -310,7 +546,7 @@ function jsonRpcPayload(method: string, params: JsonRecord = {}): JsonRpcRequest
   return { jsonrpc: '2.0', id: Date.now(), method, params };
 }
 
-async function fetchWithTimeout(url: string, options: globalThis.RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<globalThis.Response> {
+async function fetchWithTimeout(url: string, options: globalThis.RequestInit = {}, timeoutMs = Number(config.server?.requestTimeoutMs || 8000)): Promise<globalThis.Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -720,6 +956,77 @@ function asyncHandler(handler: (req: Request, res: ExpressResponse, next: NextFu
     Promise.resolve(handler(req, res, next)).catch(next);
   };
 }
+
+app.get('/api/config', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    config: cloneJson(config),
+    configPath: CONFIG_PATH,
+    backupPath: BACKUP_PATH,
+    writable: configFileWritable(),
+    maxBackups: MAX_CONFIG_BACKUPS,
+    restartRequiredFields: RESTART_REQUIRED_FIELDS
+  });
+});
+
+app.put('/api/config', (req, res, next) => {
+  try {
+    const requestBody = req.body as unknown;
+    const nextConfig = isPlainRecord(requestBody) && 'config' in requestBody ? requestBody.config : requestBody;
+    const result = saveConfig(nextConfig, 'before-save');
+    res.json({
+      ok: true,
+      ...result,
+      backups: listConfigBackups(),
+      restartRequiredFields: RESTART_REQUIRED_FIELDS
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/config/backups', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, backups: listConfigBackups(), maxBackups: MAX_CONFIG_BACKUPS });
+});
+
+app.post('/api/config/backups', (_req, res, next) => {
+  try {
+    const backup = createConfigBackup('manual');
+    res.status(201).json({ ok: true, backup, backups: listConfigBackups() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/config/backups/:name/download', (req, res, next) => {
+  try {
+    const filePath = safeBackupFile(routeParam(req.params.name, 'name'));
+    res.download(filePath, path.basename(filePath));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/config/backups/:name/restore', (req, res, next) => {
+  try {
+    const result = restoreConfigBackup(routeParam(req.params.name, 'name'));
+    res.json({ ok: true, ...result, backups: listConfigBackups() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/config/backups/:name', (req, res, next) => {
+  try {
+    const filePath = safeBackupFile(routeParam(req.params.name, 'name'));
+    fs.rmSync(filePath, { force: true });
+    res.json({ ok: true, backups: listConfigBackups() });
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get('/api/health', (req, res) => {
   res.json({

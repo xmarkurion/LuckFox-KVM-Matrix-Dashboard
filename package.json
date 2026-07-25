@@ -1,6 +1,6 @@
 {
   "name": "luckfox-kvm-matrix",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "description": "Vue and TypeScript dashboard for LuckFox PicoKVM devices and host agents.",
   "scripts": {
