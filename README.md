@@ -11,7 +11,8 @@ The UI is designed for a desktop operations screen, but it also collapses cleanl
 Credentials stay in the Node backend; the browser never receives KVM passwords or host-agent tokens.
 
 # Tutorial how to deploy - video
-![video](https://youtu.be/AO18wsLuqjw)
+[![Youtube Video](https://github.com/user-attachments/assets/30927104-bd23-481e-9e9d-e9184c5add99)](https://youtu.be/AO18wsLuqjw)
+
 
 To fully deploy go with docker. First edit the file `kvm.config.json` with your settings and ip adresses. 
 And then you can go from there. There is optional host-agent that allows you to expand dashboard into something nice. 
