@@ -1,5 +1,3 @@
-name: luckfox-kvm-matrix
-
 services:
   dashboard:
     # Build the image from this folder. No pre-existing/published image is required.
